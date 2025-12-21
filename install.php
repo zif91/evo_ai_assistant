@@ -117,7 +117,7 @@ $output = <<<HTML
 #ai-toggle-btn{position:fixed;right:0;top:50%;transform:translateY(-50%);z-index:9998;background:#6366f1;color:#fff;border:none;padding:10px 8px;cursor:pointer;border-radius:8px 0 0 8px;box-shadow:-2px 0 10px rgba(0,0,0,.2);transition:all .3s}
 #ai-toggle-btn:hover{padding-right:12px;background:#4f46e5}
 #ai-toggle-btn svg{display:block}
-#ai-sidebar{position:fixed;right:-420px;top:0;width:420px;height:100vh;z-index:9999;transition:right .3s ease;box-shadow:-5px 0 20px rgba(0,0,0,.15)}
+#ai-sidebar{position:fixed;right:-420px;top:35px;width:420px;height:calc(100vh - 35px);z-index:9999;transition:right .3s ease;box-shadow:-5px 0 20px rgba(0,0,0,.15)}
 #ai-sidebar.open{right:0}
 #ai-sidebar iframe{width:100%;height:100%;border:none}
 #ai-close-btn{position:absolute;left:-36px;top:10px;background:#6366f1;color:#fff;border:none;width:32px;height:32px;border-radius:8px 0 0 8px;cursor:pointer;display:flex;align-items:center;justify-content:center}
