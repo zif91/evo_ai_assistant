@@ -1,0 +1,30 @@
+{
+    "name": "evocms/ai-assistant",
+    "description": "AI Assistant for Evolution CMS - Shopify Sidekick-like assistant for managing content",
+    "type": "evocms-package",
+    "keywords": ["evolutioncms", "ai", "assistant", "chatbot", "cms"],
+    "license": "MIT",
+    "authors": [
+        {
+            "name": "Evolution CMS Community",
+            "email": "community@evo.im"
+        }
+    ],
+    "require": {
+        "php": ">=8.1"
+    },
+    "autoload": {
+        "psr-4": {
+            "EvolutionCMS\\AiAssistant\\": "src/"
+        }
+    },
+    "extra": {
+        "evocms": {
+            "providers": [
+                "EvolutionCMS\\AiAssistant\\AiAssistantServiceProvider"
+            ]
+        }
+    },
+    "minimum-stability": "dev",
+    "prefer-stable": true
+}

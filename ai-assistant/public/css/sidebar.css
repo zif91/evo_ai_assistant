@@ -1,0 +1,104 @@
+/* AI Assistant Sidebar Styles for Evolution CMS Manager */
+
+#ai-assistant-sidebar {
+    position: fixed;
+    top: 0;
+    right: 0;
+    height: 100vh;
+    z-index: 9999;
+    display: flex;
+    transition: transform 0.3s ease;
+}
+
+#ai-assistant-sidebar.ai-sidebar-closed {
+    transform: translateX(calc(100% - 48px));
+}
+
+#ai-assistant-sidebar.ai-sidebar-open {
+    transform: translateX(0);
+}
+
+/* Toggle Button */
+.ai-sidebar-toggle {
+    position: absolute;
+    left: 0;
+    top: 50%;
+    transform: translateY(-50%) translateX(-100%);
+    width: 48px;
+    height: 48px;
+    background: linear-gradient(135deg, #7c3aed, #9333ea);
+    border: none;
+    border-radius: 12px 0 0 12px;
+    color: white;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: -4px 0 12px rgba(0, 0, 0, 0.15);
+    transition: all 0.2s;
+}
+
+.ai-sidebar-toggle:hover {
+    background: linear-gradient(135deg, #6d28d9, #7c3aed);
+    width: 56px;
+}
+
+.ai-sidebar-toggle svg {
+    width: 24px;
+    height: 24px;
+}
+
+.ai-sidebar-open .ai-sidebar-toggle svg {
+    transform: rotate(180deg);
+}
+
+/* Sidebar Content */
+.ai-sidebar-content {
+    width: 400px;
+    height: 100%;
+    background: #ffffff;
+    box-shadow: -4px 0 20px rgba(0, 0, 0, 0.15);
+    overflow: hidden;
+}
+
+#ai-assistant-frame {
+    width: 100%;
+    height: 100%;
+    border: none;
+}
+
+/* Responsive */
+@media (max-width: 768px) {
+    .ai-sidebar-content {
+        width: 100vw;
+        max-width: 400px;
+    }
+}
+
+/* Animation for toggle button pulse */
+@keyframes ai-pulse {
+    0% {
+        box-shadow: -4px 0 12px rgba(124, 58, 237, 0.4);
+    }
+    50% {
+        box-shadow: -4px 0 20px rgba(124, 58, 237, 0.6);
+    }
+    100% {
+        box-shadow: -4px 0 12px rgba(124, 58, 237, 0.4);
+    }
+}
+
+.ai-sidebar-toggle.ai-pulse {
+    animation: ai-pulse 2s infinite;
+}
+
+/* Dark theme support */
+body.dark .ai-sidebar-content,
+body[data-theme="dark"] .ai-sidebar-content {
+    background: #1f2937;
+}
+
+body.dark #ai-assistant-frame,
+body[data-theme="dark"] #ai-assistant-frame {
+    filter: invert(1) hue-rotate(180deg);
+}
