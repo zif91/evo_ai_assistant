@@ -11,6 +11,7 @@ class Installer
     {
         $migration = require __DIR__ . '/../../migrations/2024_01_01_000001_create_ai_assistant_checkpoints_table.php';
         $migration->up();
+        (require __DIR__ . '/../../migrations/2026_10_09_000002_create_ai_assistant_jobs_table.php')->up();
         // The old standalone installer used a different table name. Preserve its
         // IDs so previously displayed checkpoint references remain meaningful.
         if (Schema::hasTable('ai_checkpoints') && DB::table('ai_assistant_checkpoints')->count() === 0) {

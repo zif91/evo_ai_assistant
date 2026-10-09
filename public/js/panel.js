@@ -20,14 +20,57 @@
 
     // State
     let isLoading = false;
+    let activeJob = null;
+    let pendingSubmission = null;
+    let polling = false;
+    let failedJobId = null;
+    const retryButton = document.createElement('button');
+    retryButton.type = 'button';
+    retryButton.textContent = 'Повторить AI-шаг';
+    retryButton.hidden = true;
+    retryButton.style.cssText = 'margin:0 16px 8px';
+    typingIndicator.parentNode.insertBefore(retryButton, typingIndicator);
+    retryButton.addEventListener('click', async function () {
+        if (!failedJobId || isLoading) return;
+        try {
+            const data = await api('/jobs/' + failedJobId + '/retry', 'POST');
+            showJob(data.job); pollJob();
+        } catch (error) { progress.textContent = error.message; }
+    });
+    const progress = document.createElement('div');
+    progress.style.cssText = 'padding:10px 16px;font-size:13px;white-space:pre-wrap';
+    progress.setAttribute('role', 'status');
+    const stopButton = document.createElement('button');
+    stopButton.type = 'button';
+    stopButton.textContent = 'Остановить задание';
+    stopButton.hidden = true;
+    stopButton.style.cssText = 'margin:0 16px 8px';
+    typingIndicator.parentNode.insertBefore(progress, typingIndicator);
+    typingIndicator.parentNode.insertBefore(stopButton, typingIndicator);
+    stopButton.addEventListener('click', async function () {
+        if (!activeJob) return;
+        try {
+            const data = await api('/jobs/' + activeJob.id + '/cancel', 'POST');
+            showJob(data.job);
+        } catch (error) { progress.textContent = error.message; }
+    });
 
     /**
      * Initialize the panel
      */
-    function init() {
+    async function init() {
+        isLoading = true;
         setupEventListeners();
         autoResizeInput();
-        loadHistory();
+        await loadHistory();
+        try {
+            const data = await api('/jobs/active');
+            if (data.job) {
+                addMessage(data.job.prompt, 'user');
+                showJob(data.job);
+                pollJob();
+            } else { isLoading = false; }
+        } catch (error) { isLoading = false; progress.textContent = error.message; }
     }
 
     async function loadHistory() {
@@ -36,7 +79,9 @@
             const data = await response.json();
             if (data.success && data.data.length) {
                 messagesContainer.innerHTML = '';
-                data.data.forEach(item => addMessage(item.content, item.role));
+                data.data.forEach(item => addMessage(item.content, item.role, item.actions));
+                const last = data.data[data.data.length - 1];
+                if (last.retryable) { failedJobId = last.job_id; retryButton.hidden = false; }
             }
         } catch (error) {
             console.error('Failed to load chat history');
@@ -95,53 +140,85 @@
     /**
      * Send message to AI
      */
+    async function api(path, method = 'GET', body) {
+        const response = await fetch(config.apiUrl + path, {
+            method, credentials: 'same-origin',
+            headers: {'Content-Type': 'application/json', 'Accept': 'application/json', 'X-AI-CSRF-Token': config.csrfToken},
+            body: body === undefined ? undefined : JSON.stringify(body)
+        });
+        let data;
+        try { data = await response.json(); }
+        catch (error) { throw new Error('Запрос прерван. Прогресс сохранён; проверяем состояние задания…'); }
+        if (!response.ok || !data.success) throw new Error(data.error || translations.error);
+        return data;
+    }
+
     async function sendMessage() {
         const message = inputField.value.trim();
-        if (!message || isLoading || !config.isConfigured) return;
-
-        // Add user message to UI
-        addMessage(message, 'user');
-
-        // Clear input
-        inputField.value = '';
-        autoResizeInput();
-
-        // Show typing indicator
-        showTyping(true);
+        if ((!message && !pendingSubmission) || isLoading || !config.isConfigured) return;
+        if (!pendingSubmission) {
+            pendingSubmission = {message, context: getPageContext(),
+                request_id: Array.from(crypto.getRandomValues(new Uint8Array(24)), n => n.toString(16).padStart(2, '0')).join('')};
+            addMessage(message, 'user');
+            inputField.value = '';
+            autoResizeInput();
+        }
         isLoading = true;
-
+        showTyping(true);
         try {
-            const response = await fetch(config.apiUrl + '/chat', {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json',
-                    'X-AI-CSRF-Token': config.csrfToken,
-                    'Accept': 'application/json',
-                },
-                body: JSON.stringify({
-                    message: message,
-                    context: getPageContext()
-                }),
-                credentials: 'same-origin'
-            });
-
-            const data = await response.json();
-
-            showTyping(false);
-            isLoading = false;
-
-            if (data.actions && !data.success) {
-                addMessage(data.error || translations.error, 'assistant', data.actions, true);
-            } else if (data.success) {
-                addMessage(data.message, 'assistant', data.actions);
-            } else {
-                addMessage(data.error || translations.error, 'assistant', null, true);
-            }
+            // Keep request_id on a network retry: enqueue cannot create a duplicate.
+            const data = await api('/chat', 'POST', pendingSubmission);
+            pendingSubmission = null;
+            showJob(data.job);
+            pollJob();
         } catch (error) {
-            showTyping(false);
             isLoading = false;
-            console.error('AI Assistant error:', error);
-            addMessage(translations.error, 'assistant', null, true);
+            showTyping(false);
+            progress.textContent = error.message + '\nНажмите «Отправить» для повторной проверки отправки.';
+        }
+    }
+
+    function showJob(job) {
+        activeJob = job;
+        retryButton.hidden = true;
+        if (job.done) {
+            addMessage(job.error || job.message || 'Готово', 'assistant', job.actions, !job.success);
+            activeJob = null;
+            isLoading = false;
+            stopButton.hidden = true;
+            showTyping(false);
+            progress.textContent = '';
+            failedJobId = job.retryable ? job.id : null;
+            retryButton.hidden = !job.retryable;
+            return;
+        }
+        isLoading = true;
+        showTyping(true);
+        stopButton.hidden = false;
+        const last = job.actions[job.actions.length - 1];
+        const label = last ? '\nПоследнее действие: ' + last.name + (last.id ? ' · #' + last.id : '') + (last.success === false ? ' · ошибка' : '') : '';
+        progress.textContent = (job.mode === 'worker' ? 'Выполняется cron-воркером' : 'Выполняется в браузере')
+            + ' · ответов модели: ' + job.iterations + ' · действий: ' + job.actions.length + label;
+        if (job.mode === 'worker' && !job.worker.available) {
+            progress.textContent += '\nВоркер давно не подавал сигнал. Проверьте cron. Задание сохранено и ждёт воркера.';
+        }
+    }
+
+    async function pollJob() {
+        if (polling || !activeJob) return;
+        polling = true;
+        const id = activeJob.id;
+        try {
+            const path = '/jobs/' + id;
+            // Status is always a short GET. Only browser jobs execute work over HTTP.
+            let data = await api(path);
+            if (!data.job.done && data.job.mode === 'browser') data = await api(path + '/step', 'POST');
+            if (activeJob && activeJob.id === id) showJob(data.job);
+        } catch (error) {
+            if (activeJob) progress.textContent = error.message + '\nВыполненные действия не запускаются повторно.';
+        } finally {
+            polling = false;
+            if (activeJob) setTimeout(pollJob, 2000);
         }
     }
 
@@ -299,7 +376,7 @@
 
         // Generic data
         if (typeof action.data === 'object') {
-            return `<pre><code>${escapeHtml(JSON.stringify(action.data, null, 2))}</code></pre>`;
+            return `<details><summary>Данные результата</summary><pre><code>${escapeHtml(JSON.stringify(action.data, null, 2))}</code></pre></details>`;
         }
 
         return `<p>${escapeHtml(String(action.data))}</p>`;
@@ -344,6 +421,7 @@
             });
 
             if (!response.ok) throw new Error('Failed to clear history');
+            failedJobId = null; retryButton.hidden = true;
             // Clear UI except welcome message
             const messages = messagesContainer.querySelectorAll('.ai-message');
             messages.forEach((msg, index) => {

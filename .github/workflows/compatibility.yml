@@ -30,7 +30,7 @@ jobs:
           test "$(git -C /tmp/evolution rev-parse HEAD)" = "649f122d6b40b9a0aa146190ff48732c56bee89b"
       - name: Lint PHP
         run: find src assets config migrations tests -name '*.php' -print0 | xargs -0 -n1 php -l
-      - run: php -l install.php
+      - run: php -l install.php && php -l worker.php
       - name: Integration checks
         env:
           EVO_SOURCE: /tmp/evolution

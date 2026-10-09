@@ -11,6 +11,13 @@ use Illuminate\Support\Collection;
 
 class CheckpointService
 {
+    private ?string $jobSession = null;
+
+    public function setJobSession(string $session): void
+    {
+        $this->jobSession = $session;
+    }
+
     /**
      * Create a checkpoint for an entity before modification
      */
@@ -29,7 +36,7 @@ class CheckpointService
             'old_value' => is_array($oldValue) ? $oldValue : ['value' => $oldValue],
             'new_value' => is_array($newValue) ? $newValue : ($newValue !== null ? ['value' => $newValue] : null),
             'user_id' => evo()->getLoginUserID('mgr') ?? null,
-            'session_id' => session_id(),
+            'session_id' => $this->jobSession ?? session_id(),
             'description' => $description,
         ]);
     }

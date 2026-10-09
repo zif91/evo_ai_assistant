@@ -51,6 +51,54 @@ class AiService
         }
     }
 
+    /** Serializable conversation state; credentials are resolved at execution time. */
+    public function beginJob(string $message, array $context = []): array
+    {
+        $messages = [['role' => 'system', 'content' => $this->config['system_prompt'] ?? '']];
+        if ($context) {
+            $messages[] = ['role' => 'system', 'content' => "Current context:\n" . json_encode($context, JSON_UNESCAPED_UNICODE)];
+        }
+        foreach (array_slice($this->conversationHistory, -10) as $item) {
+            $content = $item['content'];
+            if (!empty($item['actions'])) {
+                $content .= "\nAction results: " . json_encode(array_map(static fn($a) =>
+                    array_intersect_key($a, array_flip(['name', 'success', 'id', 'message'])), $item['actions']), JSON_UNESCAPED_UNICODE);
+            }
+            $messages[] = ['role' => $item['role'], 'content' => $content];
+        }
+        $messages[] = ['role' => 'user', 'content' => $message];
+        return ['messages' => $messages, 'iterations' => 0, 'actions' => [], 'content' => '', 'pending' => [], 'cursor' => 0];
+    }
+
+    /** One provider request, without executing any CMS mutations. */
+    public function infer(array $messages): array
+    {
+        if (!$this->isConfigured()) {
+            throw new \RuntimeException('AI Assistant is not configured');
+        }
+        $response = match ($this->provider) {
+            'openai' => $this->callOpenAI($messages),
+            'anthropic' => $this->callAnthropic($messages),
+            default => throw new \RuntimeException('Unsupported AI provider'),
+        };
+        foreach ($response['actions'] ?? [] as $action) {
+            if (empty($action['id']) || empty($action['name']) || !is_array($action['arguments'] ?? null)) {
+                throw new \RuntimeException('Invalid tool call');
+            }
+        }
+        if (!empty($response['actions']) && empty($response['assistant_message'])) {
+            $response['assistant_message'] = ['role' => 'assistant', 'content' => $response['content'] ?? '',
+                'tool_calls' => array_map(static fn($action) => ['id' => $action['id'], 'type' => 'function',
+                    'function' => ['name' => $action['name'], 'arguments' => json_encode((object) $action['arguments'], JSON_THROW_ON_ERROR)]], $response['actions'])];
+        }
+        return $response;
+    }
+
+    public function iterationLimit(): int
+    {
+        return max(1, min(30, (int) ($this->config['max_iterations'] ?? 30)));
+    }
+
     /**
      * Send a message to the AI and get a response with multi-turn tool execution
      */
@@ -261,15 +309,18 @@ class AiService
         }
 
         $response = Http::withHeaders($headers)
-            ->timeout(120)
+            ->timeout(max(5, min(900, (int) ($this->config['provider_timeout'] ?? 120))))
             ->post($endpoint, $requestBody);
 
         if (!$response->successful()) {
-            throw new \Exception('AI API error: ' . $response->body());
+            throw new \RuntimeException('AI provider HTTP error', $response->status());
         }
 
         $data = $response->json();
-        if (!is_array($data) || isset($data['error']) || empty($data['choices'][0]['message'])) {
+        if (isset($data['error'])) {
+            throw new \RuntimeException('AI provider error response', (int) ($data['error']['code'] ?? 0));
+        }
+        if (!is_array($data) || empty($data['choices'][0]['message'])) {
             throw new \RuntimeException('AI API returned an invalid response');
         }
 
@@ -369,7 +420,7 @@ class AiService
             'x-api-key' => $providerConfig['api_key'],
             'Content-Type' => 'application/json',
             'anthropic-version' => '2023-06-01',
-        ])->timeout(60)->post($providerConfig['endpoint'], [
+        ])->timeout(max(5, min(900, (int) ($this->config['provider_timeout'] ?? 60))))->post($providerConfig['endpoint'], [
             'model' => $providerConfig['model'],
             'max_tokens' => $providerConfig['max_tokens'],
             'system' => trim($systemContent),
@@ -378,7 +429,7 @@ class AiService
         ]);
 
         if (!$response->successful()) {
-            throw new \Exception('Anthropic API error: ' . $response->body());
+            throw new \RuntimeException('Anthropic provider HTTP error', $response->status());
         }
 
         $data = $response->json();

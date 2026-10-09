@@ -27,6 +27,12 @@ Route::prefix('ai-assistant')->middleware([AiAssistantAuth::class])->group(funct
         // Chat endpoint
         Route::post('/chat', [ApiController::class, 'chat'])->name('ai-assistant.api.chat');
 
+        Route::get('/jobs/active', [ApiController::class, 'activeJob']);
+        Route::get('/jobs/{id}', [ApiController::class, 'getJob']);
+        Route::post('/jobs/{id}/step', [ApiController::class, 'stepJob']);
+        Route::post('/jobs/{id}/retry', [ApiController::class, 'retryJob']);
+        Route::post('/jobs/{id}/cancel', [ApiController::class, 'cancelJob']);
+
         // Execute AI action
         Route::post('/execute', [ApiController::class, 'execute'])->name('ai-assistant.api.execute');
 

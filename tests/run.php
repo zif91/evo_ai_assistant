@@ -218,12 +218,91 @@ check(count(Http::recorded(fn($r) => !in_array('get_resource', array_column(arra
 function csrf_field() { return new Illuminate\Support\HtmlString('<input type="hidden" name="_token" value="native-test-token">'); }
 $_SERVER['REQUEST_METHOD'] = 'GET';
 ob_start(); include __DIR__ . '/../assets/modules/ai_assistant_settings.php'; $moduleHtml = ob_get_clean();
+check(str_contains($moduleHtml, 'Cron-воркер не обнаружен') && str_contains($moduleHtml, 'docs/worker.md'), 'settings warn about timeouts and link to worker instructions');
 check(str_contains($moduleHtml, 'name="_token"') && str_contains($moduleHtml, 'name="_ai_token"') && !str_contains($moduleHtml, 'secret-fixture'), 'manager settings include native and assistant CSRF without exposing key');
 $_SERVER['REQUEST_METHOD'] = 'POST';
 $_POST = ['_ai_token' => ManagerSecurity::token(), 'save' => '1', 'provider' => 'openai', 'api_url' => 'https://openrouter.ai/api/v1', 'model' => 'fixture/model', 'api_key' => ''];
 ob_start(); include __DIR__ . '/../assets/modules/ai_assistant_settings.php'; $moduleHtml = ob_get_clean();
 check(str_contains($moduleHtml, 'Настройки сохранены') && Capsule::table('system_settings')->where('setting_name', 'ai_assistant_api_key')->value('setting_value') === 'secret-fixture', 'manager settings save preserves key with empty input');
 $_POST = []; $_SERVER['REQUEST_METHOD'] = 'GET';
+// Durable jobs: each request/process performs only one model or CMS step.
+$jobs = new EvolutionCMS\AiAssistant\Services\JobService();
+$jobConfig = $articleConfig;
+$jobConfig['max_iterations'] = 30;
+$ai = new AiService($jobConfig);
+$createTool = ['id' => 'durable_create', 'type' => 'function', 'function' => ['name' => 'create_resource', 'arguments' => '{"pagetitle":"Durable draft"}']];
+Http::swap(new Factory());
+Http::fake(['*' => Http::sequence()
+    ->push(['choices' => [['message' => ['role' => 'assistant', 'tool_calls' => [$createTool], 'reasoning_details' => [['type' => 'text', 'text' => 'metadata']]]]]])
+    ->push(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Draft saved']]]])]);
+$job = $jobs->enqueue(1, 'fixture-session', str_repeat('a', 24), 'Create draft', $ai->beginJob('Create draft'));
+check($job->mode === 'browser', 'missing worker selects AJAX fallback');
+check($jobs->enqueue(1, 'other-session', str_repeat('a', 24), 'duplicate', [])->id === $job->id, 'submission retry is idempotent');
+check($jobs->enqueue(1, 'other-session', str_repeat('b', 24), 'second task', [])->id === $job->id, 'one active task across manager tabs');
+$executed = 0;
+$executor = function ($name, $args) use ($resources, &$executed) {
+    $executed++; $created = $resources->create($args);
+    return ['success' => true, 'id' => $created->id];
+};
+$job = $jobs->advance($job, $ai, $executor);
+check($executed === 0 && count($job->state['pending']) === 1, 'provider response persisted before mutation');
+$lock = $jobs::lock('job-' . $job->id);
+$jobs->advance($job, $ai, $executor);
+check($executed === 0, 'concurrent step cannot execute a locked job');
+$jobs::unlock($lock);
+// Recreate service and model, as after PHP process exit / browser reload.
+$job = (new EvolutionCMS\AiAssistant\Services\JobService())->advance(EvolutionCMS\AiAssistant\Models\Job::find($job->id), new AiService($jobConfig), $executor);
+check($executed === 1 && count($job->state['actions']) === 1, 'fresh process resumes saved tool call');
+$job = $jobs->advance($job, new AiService($jobConfig), $executor);
+$jobs->advance($job, $ai, $executor);
+check($job->status === 'completed' && $executed === 1, 'completed job cannot replay resource creation');
+check(count(Http::recorded(fn($r) => isset($r['messages'][2]['reasoning_details']) && ($r['messages'][3]['tool_call_id'] ?? '') === 'durable_create')) === 1, 'job retains reasoning metadata and tool result across steps');
+check(count($jobs->history(1)) === 2, 'durable conversation history survives session loss');
+$jobs::heartbeat(1); $jobs::heartbeat(2);
+check($jobs::workerStatus()['available'], 'worker detected through persisted heartbeat');
+$workerJob = $jobs->enqueue(2, 'session2', str_repeat('c',24), 'Worker task', $ai->beginJob('Worker task'));
+check($workerJob->mode === 'worker', 'available worker selects background queue');
+$workerJob->status = 'applying'; $workerJob->save();
+$workerJob = $jobs->advance($workerJob, $ai, $executor);
+check($workerJob->status === 'needs_review' && $executed === 1, 'interrupted mutation requires review and is never blindly replayed');
+$ownerController = new EvolutionCMS\AiAssistant\Controllers\ApiController();
+check($ownerController->getJob($workerJob->id)->getStatusCode() === 404, 'job details restricted to submitting manager user');
+$mine = $jobs->enqueue(1, 'fixture-session', str_repeat('d',24), 'Queued', $ai->beginJob('Queued'));
+check($ownerController->stepJob($mine->id)->getStatusCode() === 409, 'browser cannot execute a worker-owned job');
+check($ownerController->clearHistory()->getStatusCode() === 409, 'active job prevents history being cleared');
+$jobs->cancel($mine);
+check($mine->fresh()->status === 'cancelled', 'queued task can be cancelled without mutations');
+Illuminate\Support\Facades\DB::table('ai_assistant_settings')->where('key', 'worker_heartbeat_1')->update(['value' => (string)(time()-421)]);
+check(!$jobs::workerStatus()['available'], 'stale heartbeat switches new jobs to fallback');
+$anthropicConfig = $jobConfig; $anthropicConfig['provider'] = 'anthropic'; $anthropicConfig['providers']['anthropic']['api_key'] = 'fixture';
+Http::swap(new Factory());
+Http::fake(['*' => Http::sequence()->push(['content' => [['type' => 'tool_use', 'id' => 'toolu_job', 'name' => 'get_resource', 'input' => ['id' => 1]]]])->push(['content' => [['type' => 'text', 'text' => 'Done']]])]);
+$anthropicAi = new AiService($anthropicConfig);
+$anthropicJob = $jobs->enqueue(3, 'session3', str_repeat('e',24), 'Anthropic', $anthropicAi->beginJob('Anthropic'));
+for ($i=0;$i<3;$i++) $anthropicJob = $jobs->advance($anthropicJob, $anthropicAi, fn() => ['success' => true]);
+check($anthropicJob->status === 'completed', 'Anthropic durable job reconstructs tool conversation');
+$policyConfig = $jobConfig; $policyConfig['actions']['edit_resources'] = false;
+// Runtime controller still enforces policy; fake executor checks are separate from that path.
+$jobState = $ai->beginJob('Mutation exception');
+$jobState['pending'] = [['id'=>'interrupt', 'name'=>'create_resource', 'arguments'=>[]]];
+$interrupted = $jobs->enqueue(4, 'session4', str_repeat('f',24), 'Interrupted', $jobState);
+$interrupted = $jobs->advance($interrupted, $ai, function () { throw new RuntimeException('secret-provider-payload'); });
+check($interrupted->status === 'needs_review' && !str_contains($interrupted->error, 'secret-provider-payload'), 'mutation exception preserves uncertainty without exposing secrets');
+
+$retryState = $ai->beginJob('Provider retry');
+$retryJob = $jobs->enqueue(5, 'session5', str_repeat('g',24), 'Retry', $retryState);
+Http::swap(new Factory()); Http::fake(['*' => Http::response(['error'=>['message'=>'private']], 429)]);
+$retryJob = $jobs->advance($retryJob, $ai, fn() => []);
+check($retryJob->status === 'failed' && $retryJob->state['retryable'] && str_contains($retryJob->error, 'HTTP 429'), 'provider failure can be retried with safe HTTP diagnostics');
+$jobs->retry($retryJob);
+Http::swap(new Factory()); Http::fake(['*' => Http::response(['choices'=>[['message'=>['role'=>'assistant','content'=>'Recovered']]]])]);
+$retryJob = $jobs->advance($retryJob, $ai, fn() => []);
+check($retryJob->status === 'completed' && $retryJob->state['content'] === 'Recovered', 'retry resumes same saved conversation');
+$refused = false;
+try { $jobs->retry($interrupted); } catch (RuntimeException $e) { $refused = true; }
+check($refused, 'uncertain CMS mutation cannot use AI retry');
+check(!$jobs::workerStatus(99)['available'], 'one administrator heartbeat cannot route other users to an absent worker');
+
 echo "OK: $checks checks, PHP " . PHP_VERSION . "\n";
 // Remove only the isolated test directory.
 $app['files']->deleteDirectory($testRoot);

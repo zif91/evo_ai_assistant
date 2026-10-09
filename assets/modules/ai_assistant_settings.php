@@ -40,6 +40,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         }
     }
 }
+$worker = \EvolutionCMS\AiAssistant\Services\JobService::workerStatus();
 $catalog = (new ModelCatalog())->get(isset($_POST['refresh']) && !$error);
 ?>
 <!doctype html>
@@ -50,6 +51,16 @@ $catalog = (new ModelCatalog())->get(isset($_POST['refresh']) && !$error);
 <?php if ($error): ?><p class="error"><?= $escape($error) ?></p><?php endif ?>
 <?php if ($success): ?><p class="success">Настройки сохранены, кеш CMS очищен.</p><?php endif ?>
 <p>OpenRouter и другие API с форматом OpenAI Chat Completions; также прямой Anthropic Messages API. Доступ к ассистенту имеют администраторы CMS.</p>
+<section style="padding:16px;border:1px solid <?= $worker['available'] ? '#86efac' : '#fbbf24' ?>;border-radius:8px;background:<?= $worker['available'] ? '#f0fdf4' : '#fffbeb' ?>">
+<strong><?= $worker['available'] ? 'Cron-воркер доступен' : 'Cron-воркер не обнаружен' ?></strong>
+<?php if ($worker['available']): ?>
+<p>Новые задания выполняются в фоне. Панель показывает сохранённый прогресс; её можно закрыть.</p>
+<?php else: ?>
+<p>Без воркера большие задачи могут прерываться по таймауту хостинга. Используйте быстрые модели и дробите задачу на части. Выполнение идёт пошагово, пока открыта панель; после перезагрузки можно продолжить.</p>
+<?php endif ?>
+<p>Последний сигнал: <?= $worker['last_seen'] ? $escape(gmdate('Y-m-d H:i:s', $worker['last_seen'])) . ' UTC' : 'ещё не получен' ?>. Статус считается актуальным 7 минут; обновите страницу для проверки.</p>
+<a href="<?= $escape($worker['instructions_url']) ?>" target="_blank" rel="noopener noreferrer">Инструкция по настройке cron-воркера</a>
+</section>
 <form method="post">
 <?= csrf_field()->toHtml() ?>
 <input type="hidden" name="_ai_token" value="<?= $escape(ManagerSecurity::token()) ?>">

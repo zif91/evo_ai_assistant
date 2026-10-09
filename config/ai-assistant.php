@@ -28,7 +28,8 @@ return [
     */
     'debug' => false,
     'max_iterations' => 30,
-    'request_time_limit' => 300, // PHP execution budget for an authenticated chat request.
+    'request_time_limit' => 300, // Best-effort PHP budget for a browser step; host limits still apply.
+    'provider_timeout' => PHP_SAPI === 'cli' ? 300 : 120, // One AI response, not the whole job.
     'provider' => evo_setting('ai_assistant_provider', 'openai'),
 
     'providers' => [

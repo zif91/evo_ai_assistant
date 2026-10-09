@@ -3,6 +3,8 @@
 namespace EvolutionCMS\AiAssistant\Controllers;
 
 use EvolutionCMS\AiAssistant\Models\Checkpoint;
+use EvolutionCMS\AiAssistant\Models\Job;
+use EvolutionCMS\AiAssistant\Services\JobService;
 use EvolutionCMS\AiAssistant\Services\AiService;
 use EvolutionCMS\AiAssistant\Services\CheckpointService;
 use EvolutionCMS\AiAssistant\Services\ResourceService;
@@ -58,47 +60,89 @@ class ApiController extends Controller
      */
     public function chat(Request $request): JsonResponse
     {
-        // A multi-step AI request can exceed PHP's usual 30-second limit.
-        // Keep a finite budget; upstream proxy/FPM limits still apply.
-        if (function_exists('set_time_limit')) {
-            @set_time_limit(max(30, min(900, (int) config('ai-assistant.request_time_limit', 300))));
-        }
         $this->initServices();
         $message = $request->input('message', '');
         $context = $request->input('context', []);
-        if (!is_string($message) || strlen($message) > 32000 || !is_array($context)) {
-            return response()->json(['success' => false, 'error' => 'Invalid message or context.'], 422);
+        $requestId = $request->input('request_id', '');
+        if (!is_string($message) || !trim($message) || strlen($message) > 32000 || !is_array($context)
+            || !is_string($requestId) || !preg_match('/^[a-zA-Z0-9_-]{16,64}$/D', $requestId)) {
+            return response()->json(['success' => false, 'error' => 'Invalid message, context or request ID.'], 422);
         }
-
-        if (empty($message)) {
-            return response()->json([
-                'success' => false,
-                'error' => 'Message is required',
-            ], 400);
+        if (!$this->aiService->isConfigured()) {
+            return response()->json(['success' => false, 'error' => 'AI Assistant is not configured'], 422);
         }
+        $jobs = new JobService();
+        $user = (int) $_SESSION['mgrInternalKey'];
+        $history = $jobs->history($user);
+        $this->aiService->setHistory($history ?: ($_SESSION['ai_assistant_history'] ?? []));
+        $job = $jobs->enqueue($user, session_id(), $requestId, $message, $this->aiService->beginJob($message, $context));
+        return response()->json(['success' => true, 'job' => $jobs->summary($job)], 202);
+    }
 
-        // Get conversation history from session
-        $history = ($_SESSION['ai_assistant_history'] ?? []);
-        $this->aiService->setHistory($history);
+    private function ownedJob(string $id): ?Job
+    {
+        return Job::where('user_id', (int) $_SESSION['mgrInternalKey'])->find($id);
+    }
 
-        // Set tool executor so AI can execute tools in multi-turn loop
-        $this->aiService->setToolExecutor(function($name, $args) {
-            return $this->executeAction(['name' => $name, 'arguments' => $args]);
-        });
+    public function activeJob(): JsonResponse
+    {
+        $jobs = new JobService();
+        $job = $jobs->active((int) $_SESSION['mgrInternalKey']);
+        return response()->json(['success' => true, 'job' => $job ? $jobs->summary($job) : null]);
+    }
 
-        // Get AI response (with multi-turn tool execution)
-        $response = $this->aiService->chat($message, $context);
+    public function getJob(string $id): JsonResponse
+    {
+        $job = $this->ownedJob($id);
+        return $job ? response()->json(['success' => true, 'job' => (new JobService())->summary($job)])
+            : response()->json(['success' => false, 'error' => 'Job not found'], 404);
+    }
 
-        // Save updated history
-        $_SESSION['ai_assistant_history'] = $this->aiService->getHistory();
+    public function stepJob(string $id): JsonResponse
+    {
+        $job = $this->ownedJob($id);
+        if (!$job) return response()->json(['success' => false, 'error' => 'Job not found'], 404);
+        if ($job->mode !== 'browser') return response()->json(['success' => false, 'error' => 'This job belongs to the worker'], 409);
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(max(30, min(900, (int) config('ai-assistant.request_time_limit', 300))));
+        }
+        // Polling and other manager requests must not wait on this native session lock.
+        if (session_status() === PHP_SESSION_ACTIVE) session_write_close();
+        $job = $this->processJob($job);
+        return response()->json(['success' => true, 'job' => (new JobService())->summary($job)]);
+    }
 
-        return response()->json([
-            'success' => $response['success'] ?? true,
-            'response' => $response['content'] ?? '',
-            'message' => $response['content'] ?? '',
-            'error' => $response['error'] ?? null,
-            'actions' => $response['actions'] ?? [],
-        ]);
+    /** Trusted CLI entry; HTTP routes always enforce ownership above. */
+    public function processJob(Job $job): Job
+    {
+        $this->initServices();
+        $this->checkpointService->setJobSession($job->session_id);
+        return (new JobService())->advance($job, $this->aiService,
+            fn($name, $args) => $this->executeAction(['name' => $name, 'arguments' => $args]));
+    }
+
+    public function retryJob(string $id): JsonResponse
+    {
+        $job = $this->ownedJob($id);
+        if (!$job) return response()->json(['success' => false, 'error' => 'Job not found'], 404);
+        try {
+            $jobs = new JobService();
+            return response()->json(['success' => true, 'job' => $jobs->summary($jobs->retry($job))]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 409);
+        }
+    }
+
+    public function cancelJob(string $id): JsonResponse
+    {
+        $job = $this->ownedJob($id);
+        if (!$job) return response()->json(['success' => false, 'error' => 'Job not found'], 404);
+        try {
+            $jobs = new JobService();
+            return response()->json(['success' => true, 'job' => $jobs->summary($jobs->cancel($job))]);
+        } catch (\RuntimeException $e) {
+            return response()->json(['success' => false, 'error' => $e->getMessage()], 409);
+        }
     }
 
     /**
@@ -777,7 +821,7 @@ class ApiController extends Controller
         $this->initServices();
         return response()->json([
             'success' => true,
-            'data' => ($_SESSION['ai_assistant_history'] ?? []),
+            'data' => (new JobService())->history((int) $_SESSION['mgrInternalKey']) ?: ($_SESSION['ai_assistant_history'] ?? []),
         ]);
     }
 
@@ -787,6 +831,11 @@ class ApiController extends Controller
     public function clearHistory(): JsonResponse
     {
         $this->initServices();
+        $jobs = new JobService();
+        if ($jobs->active((int) $_SESSION['mgrInternalKey'])) {
+            return response()->json(['success' => false, 'error' => 'Stop or finish the active job first'], 409);
+        }
+        Job::where('user_id', (int) $_SESSION['mgrInternalKey'])->update(['hidden' => true]);
         unset($_SESSION['ai_assistant_history']);
 
         return response()->json([
