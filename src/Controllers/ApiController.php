@@ -58,6 +58,11 @@ class ApiController extends Controller
      */
     public function chat(Request $request): JsonResponse
     {
+        // A multi-step AI request can exceed PHP's usual 30-second limit.
+        // Keep a finite budget; upstream proxy/FPM limits still apply.
+        if (function_exists('set_time_limit')) {
+            @set_time_limit(max(30, min(900, (int) config('ai-assistant.request_time_limit', 300))));
+        }
         $this->initServices();
         $message = $request->input('message', '');
         $context = $request->input('context', []);

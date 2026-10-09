@@ -154,6 +154,21 @@ Http::fake(['*' => Http::sequence()->push(['content' => [['type' => 'tool_use', 
 $ai = new AiService($config); $ai->setToolExecutor(fn() => ['success' => true]);
 check($ai->chat('Get page')['success'], 'Anthropic multi-turn tool loop');
 check(count(Http::recorded(fn($r) => ($r['messages'][2]['role'] ?? '') === 'user' && ($r['messages'][2]['content'][0]['type'] ?? '') === 'tool_result')) === 1, 'Anthropic request blocks');
+// A complete article can need a resource update and more than 15 TV writes.
+$articleConfig = require __DIR__ . '/../config/ai-assistant.php';
+$articleConfig['providers']['openai']['api_key'] = 'fixture';
+Http::swap(new Factory());
+$articleSequence = Http::sequence();
+for ($step = 0; $step < 18; $step++) {
+    $articleTool = ['id' => 'article_' . $step, 'type' => 'function', 'function' => ['name' => 'update_tv', 'arguments' => '{"resource_id":1,"tv_name":"fixture","value":"text"}']];
+    $articleSequence->push(['choices' => [['message' => ['role' => 'assistant', 'content' => null, 'tool_calls' => [$articleTool]]]]]);
+}
+$articleSequence->push(['choices' => [['message' => ['role' => 'assistant', 'content' => 'Article ready']]]]);
+Http::fake(['*' => $articleSequence]);
+$articleAi = new AiService($articleConfig);
+$articleAi->setToolExecutor(fn() => ['success' => true]);
+$articleResult = $articleAi->chat('Create a complete article with SEO and TV fields');
+check($articleResult['success'] && count($articleResult['actions']) === 18, 'default budget completes article-sized tool workflow');
 $config['provider'] = 'openai'; $config['max_iterations'] = 1;
 Http::swap(new Factory());
 Http::fake(['*' => Http::response(['choices' => [['message' => ['tool_calls' => [$tool]]]]])]);

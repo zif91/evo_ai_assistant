@@ -60,7 +60,7 @@ class AiService
             return ['success' => false, 'content' => '', 'actions' => [], 'error' => 'AI Assistant is not configured'];
         }
         $systemPrompt = $this->config['system_prompt'] ?? '';
-        $maxIterations = max(1, min(30, (int) ($this->config['max_iterations'] ?? 15))); // Allow complex multi-step tasks
+        $maxIterations = max(1, min(30, (int) ($this->config['max_iterations'] ?? 30))); // Allow complex multi-step tasks
 
         $this->debugLog("=== NEW CHAT REQUEST ===", ['message' => $message]);
 

@@ -27,21 +27,22 @@ return [
     |
     */
     'debug' => false,
-    'max_iterations' => 15,
+    'max_iterations' => 30,
+    'request_time_limit' => 300, // PHP execution budget for an authenticated chat request.
     'provider' => evo_setting('ai_assistant_provider', 'openai'),
 
     'providers' => [
         'openai' => [
             'api_key' => evo_setting('ai_assistant_api_key', ''),
             'model' => evo_setting('ai_assistant_model', 'openai/gpt-5.4-mini'),
-            'max_tokens' => 4096,
+            'max_tokens' => 16384,
             'temperature' => 0.7,
             'endpoint' => rtrim(evo_setting('ai_assistant_api_url', 'https://openrouter.ai/api/v1'), '/') . '/chat/completions',
         ],
         'anthropic' => [
             'api_key' => evo_setting('ai_assistant_api_key', ''),
             'model' => evo_setting('ai_assistant_model', 'claude-sonnet-4-6'),
-            'max_tokens' => 4096,
+            'max_tokens' => 16384,
             'endpoint' => 'https://api.anthropic.com/v1/messages',
         ],
     ],
