@@ -17,6 +17,7 @@ class PanelController extends Controller
         $translations = $translations['panel'];
         $config = [
             'apiUrl' => $baseUrl . '/ai-assistant/api',
+            'assetUrl' => $baseUrl . '/assets/ai-assistant',
             'isConfigured' => (bool) evo()->getConfig('ai_assistant_api_key', ''),
             'csrfToken' => ManagerSecurity::token(),
         ];

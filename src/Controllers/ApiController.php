@@ -303,7 +303,7 @@ class ApiController extends Controller
     public function updateResource(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('save_document')) {
+        if (!evo()->hasPermission('save_document', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -331,7 +331,7 @@ class ApiController extends Controller
     public function publishResource(int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('publish_document')) {
+        if (!evo()->hasPermission('publish_document', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -359,7 +359,7 @@ class ApiController extends Controller
     public function unpublishResource(int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('publish_document')) {
+        if (!evo()->hasPermission('publish_document', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -399,7 +399,7 @@ class ApiController extends Controller
     public function updateResourceTv(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('save_document')) {
+        if (!evo()->hasPermission('save_document', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -435,7 +435,7 @@ class ApiController extends Controller
     public function createTv(Request $request): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('new_template') && !evo()->hasPermission('edit_template')) {
+        if (!evo()->hasPermission('new_template', 'mgr') && !evo()->hasPermission('edit_template', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -484,7 +484,7 @@ class ApiController extends Controller
     public function updateTv(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('edit_template')) {
+        if (!evo()->hasPermission('edit_template', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -512,7 +512,7 @@ class ApiController extends Controller
     public function bindTvToTemplates(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('edit_template')) {
+        if (!evo()->hasPermission('edit_template', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -568,7 +568,7 @@ class ApiController extends Controller
     public function updateTemplate(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('save_template')) {
+        if (!evo()->hasPermission('save_template', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -596,7 +596,7 @@ class ApiController extends Controller
     public function updateBladeTemplate(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('save_template')) {
+        if (!evo()->hasPermission('save_template', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -631,7 +631,7 @@ class ApiController extends Controller
     public function optimizeSeo(Request $request, int $id): JsonResponse
     {
         $this->initServices();
-        if (!evo()->hasPermission('save_document')) {
+        if (!evo()->hasPermission('save_document', 'mgr')) {
             return response()->json([
                 'success' => false,
                 'error' => 'Permission denied',
@@ -915,13 +915,13 @@ class ApiController extends Controller
                 'version' => '1.1.0',
                 'ai_configured' => $this->aiService->isConfigured(),
                 'user' => [
-                    'id' => evo()->getLoginUserID(),
+                    'id' => evo()->getLoginUserID('mgr'),
                     'permissions' => [
-                        'view_document' => evo()->hasPermission('view_document'),
-                        'edit_document' => evo()->hasPermission('edit_document'),
-                        'save_document' => evo()->hasPermission('save_document'),
-                        'publish_document' => evo()->hasPermission('publish_document'),
-                        'edit_template' => evo()->hasPermission('edit_template'),
+                        'view_document' => evo()->hasPermission('view_document', 'mgr'),
+                        'edit_document' => evo()->hasPermission('edit_document', 'mgr'),
+                        'save_document' => evo()->hasPermission('save_document', 'mgr'),
+                        'publish_document' => evo()->hasPermission('publish_document', 'mgr'),
+                        'edit_template' => evo()->hasPermission('edit_template', 'mgr'),
                     ],
                 ],
             ],

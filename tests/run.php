@@ -44,10 +44,13 @@ function response($content = null) {
 $GLOBALS['evoFixture'] = new class {
     public int $clears = 0;
     public array $settings = [];
-    public function getLoginUserID($context = 'mgr') { return 1; }
+    private string $context = 'web';
+    public function getContext() { return $this->context; }
+    public function setContext($context) { $this->context = $context; }
+    public function getLoginUserID($context = '') { return ($context ?: $this->context) === 'mgr' ? 1 : 0; }
     public function getConfig($key, $default = null) { return $this->settings[$key] ?? $default; }
     public function clearCache($type) { $this->clears++; }
-    public function hasPermission($permission) { return true; }
+    public function hasPermission($permission, $context = '') { return $context === 'mgr'; }
     public function normalizeFormat() { return 'Y-m-d H:i:s'; }
 };
 $app = new Container();
@@ -123,6 +126,10 @@ $request = Illuminate\Http\Request::create('/ai-assistant/api/chat', 'POST');
 check($middleware->handle($request, $next)->getStatusCode() === 403, 'rejects mutation without CSRF');
 $request->headers->set('X-AI-CSRF-Token', ManagerSecurity::token());
 check($middleware->handle($request, $next)->getStatusCode() === 200, 'accepts admin with CSRF');
+check($middleware->handle($request, function () use ($resources) {
+    $resource = $resources->create(['pagetitle' => 'Manager author fixture']);
+    return response((string) $resource->createdby);
+})->getContent() === '1' && evo()->getContext() === 'web', 'manager context covers native model author events and restores frontend');
 $_SESSION['mgrRole'] = 2;
 check($middleware->handle($request, $next)->getStatusCode() === 403, 'rejects non-admin manager');
 $_SESSION['mgrRole'] = 1;
@@ -162,6 +169,8 @@ check(!(new AiService($config))->chat('Error')['success'], 'HTTP 200 provider er
 $controller = new EvolutionCMS\AiAssistant\Controllers\ApiController();
 check($controller->status()->getStatusCode() === 200, 'status endpoint initializes its services');
 check($controller->listTemplates()->getStatusCode() === 200, 'direct endpoint initializes its services');
+check($controller->status()->getData(true)['data']['user']['id'] === 1 && $controller->status()->getData(true)['data']['user']['permissions']['save_document'], 'HTTP API checks manager context and attributes manager user');
+check($controller->createTv(Illuminate\Http\Request::create('/tv', 'POST', ['name' => 'context_test']))->getStatusCode() === 200, 'direct TV creation uses manager permissions');
 check(is_subclass_of(EvolutionCMS\AiAssistant\AiAssistantServiceProvider::class, EvolutionCMS\ServiceProvider::class), 'provider loads with upstream base class');
 // Render the actual Blade panel through Illuminate's view engine.
 $files = $app['files'];
@@ -173,7 +182,8 @@ $view = new Illuminate\View\Factory($resolver, $finder, new Illuminate\Events\Di
 $view->setContainer($app); $app->instance('view', $view);
 $view->addNamespace('ai-assistant', __DIR__ . '/../views');
 function view($name, $data = []) { return app('view')->make($name, $data); }
-function url($path) { return rtrim(MODX_SITE_URL, '/') . '/' . ltrim($path, '/'); }
+// Evolution's url() resolves document IDs, unlike Laravel's path helper.
+function url(int $id, string $alias = '', string $args = '', string $scheme = '') { return MODX_SITE_URL . $id; }
 function config_path($path) { return MODX_BASE_PATH . 'core/custom/config/' . $path; }
 $panel = (new EvolutionCMS\AiAssistant\Controllers\PanelController())->index()->getContent();
 check(str_contains($panel, 'ai-messages') && str_contains($panel, 'csrfToken') && str_contains($panel, '/subdir/assets/ai-assistant/js/panel.js'), 'renders real Blade panel with CSRF and subdirectory URLs');
@@ -189,6 +199,16 @@ Http::fake(['*' => Http::response(['choices' => [['message' => ['role' => 'assis
 $config['actions']['search_resources'] = false;
 (new AiService($config))->chat('Hello');
 check(count(Http::recorded(fn($r) => !in_array('get_resource', array_column(array_column($r['tools'], 'function'), 'name'), true))) === 1, 'disabled tools omitted from provider request');
+// The manager requires its own CSRF field before the module can process POST.
+function csrf_field() { return new Illuminate\Support\HtmlString('<input type="hidden" name="_token" value="native-test-token">'); }
+$_SERVER['REQUEST_METHOD'] = 'GET';
+ob_start(); include __DIR__ . '/../assets/modules/ai_assistant_settings.php'; $moduleHtml = ob_get_clean();
+check(str_contains($moduleHtml, 'name="_token"') && str_contains($moduleHtml, 'name="_ai_token"') && !str_contains($moduleHtml, 'secret-fixture'), 'manager settings include native and assistant CSRF without exposing key');
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = ['_ai_token' => ManagerSecurity::token(), 'save' => '1', 'provider' => 'openai', 'api_url' => 'https://openrouter.ai/api/v1', 'model' => 'fixture/model', 'api_key' => ''];
+ob_start(); include __DIR__ . '/../assets/modules/ai_assistant_settings.php'; $moduleHtml = ob_get_clean();
+check(str_contains($moduleHtml, 'Настройки сохранены') && Capsule::table('system_settings')->where('setting_name', 'ai_assistant_api_key')->value('setting_value') === 'secret-fixture', 'manager settings save preserves key with empty input');
+$_POST = []; $_SERVER['REQUEST_METHOD'] = 'GET';
 echo "OK: $checks checks, PHP " . PHP_VERSION . "\n";
 // Remove only the isolated test directory.
 $app['files']->deleteDirectory($testRoot);

@@ -4,7 +4,7 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{{ $translations['title'] }}</title>
-    <link rel="stylesheet" href="{{ url('/assets/ai-assistant/css/panel.css') }}">
+    <link rel="stylesheet" href="{{ $config['assetUrl'] . '/css/panel.css' }}">
 </head>
 <body>
     <div id="ai-assistant-panel" class="ai-panel" data-config='@json($config)'>
@@ -124,6 +124,6 @@
         window.AiAssistantConfig = @json($config);
         window.AiAssistantTranslations = @json($translations);
     </script>
-    <script src="{{ url('/assets/ai-assistant/js/panel.js') }}"></script>
+    <script src="{{ $config['assetUrl'] . '/js/panel.js' }}"></script>
 </body>
 </html>

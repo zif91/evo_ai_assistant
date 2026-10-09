@@ -51,6 +51,7 @@ $catalog = (new ModelCatalog())->get(isset($_POST['refresh']) && !$error);
 <?php if ($success): ?><p class="success">Настройки сохранены, кеш CMS очищен.</p><?php endif ?>
 <p>OpenRouter и другие API с форматом OpenAI Chat Completions; также прямой Anthropic Messages API. Доступ к ассистенту имеют администраторы CMS.</p>
 <form method="post">
+<?= csrf_field()->toHtml() ?>
 <input type="hidden" name="_ai_token" value="<?= $escape(ManagerSecurity::token()) ?>">
 <label for="provider">Протокол API</label><select name="provider" id="provider">
 <option value="openai" <?= $values['provider'] === 'openai' ? 'selected' : '' ?>>OpenRouter / OpenAI-compatible</option>

@@ -28,7 +28,7 @@ class CheckpointService
             'field_name' => $fieldName,
             'old_value' => is_array($oldValue) ? $oldValue : ['value' => $oldValue],
             'new_value' => is_array($newValue) ? $newValue : ($newValue !== null ? ['value' => $newValue] : null),
-            'user_id' => evo()->getLoginUserID() ?? null,
+            'user_id' => evo()->getLoginUserID('mgr') ?? null,
             'session_id' => session_id(),
             'description' => $description,
         ]);

@@ -272,7 +272,7 @@ class ResourceService
 
         $resource->published = 1;
         $resource->publishedon = time();
-        $resource->publishedby = evo()->getLoginUserID();
+        $resource->publishedby = evo()->getLoginUserID('mgr');
         $resource->save();
         evo()->clearCache('full');
 
@@ -326,7 +326,7 @@ class ResourceService
             'menuindex' => 0,
             'searchable' => 1,
             'cacheable' => 1,
-            'createdby' => evo()->getLoginUserID(),
+            'createdby' => evo()->getLoginUserID('mgr'),
             'createdon' => time(),
         ];
 

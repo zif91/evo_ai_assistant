@@ -34,6 +34,14 @@ class AiAssistantAuth
             && !ManagerSecurity::validToken($request->header('X-AI-CSRF-Token') ?? $request->input('_ai_token'))) {
             return response()->json(['success' => false, 'error' => 'CSRF token mismatch. Reload the panel.'], 403);
         }
-        return $next($request)->header('Cache-Control', 'no-store');
+        // Evolution model events resolve the author from the current context.
+        // These routes enter through the frontend, but execute as a manager.
+        $context = evo()->getContext();
+        evo()->setContext('mgr');
+        try {
+            return $next($request)->header('Cache-Control', 'no-store');
+        } finally {
+            evo()->setContext($context);
+        }
     }
 }
