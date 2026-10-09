@@ -11,7 +11,8 @@ return new class extends Migration
      */
     public function up(): void
     {
-        Schema::create('ai_assistant_checkpoints', function (Blueprint $table) {
+        if (!Schema::hasTable('ai_assistant_checkpoints')) {
+            Schema::create('ai_assistant_checkpoints', function (Blueprint $table) {
             $table->id();
             $table->string('entity_type', 50); // resource, tv_value, tv, template
             $table->unsignedBigInteger('entity_id');
@@ -28,9 +29,11 @@ return new class extends Migration
             $table->index('session_id');
             $table->index('user_id');
             $table->index('is_rolled_back');
-        });
+            });
+        }
 
-        Schema::create('ai_assistant_conversations', function (Blueprint $table) {
+        if (!Schema::hasTable('ai_assistant_conversations')) {
+            Schema::create('ai_assistant_conversations', function (Blueprint $table) {
             $table->id();
             $table->string('session_id', 100);
             $table->unsignedInteger('user_id');
@@ -41,14 +44,17 @@ return new class extends Migration
 
             $table->index('session_id');
             $table->index('user_id');
-        });
+            });
+        }
 
-        Schema::create('ai_assistant_settings', function (Blueprint $table) {
+        if (!Schema::hasTable('ai_assistant_settings')) {
+            Schema::create('ai_assistant_settings', function (Blueprint $table) {
             $table->id();
             $table->string('key', 100)->unique();
             $table->longText('value')->nullable();
             $table->timestamps();
-        });
+            });
+        }
     }
 
     /**

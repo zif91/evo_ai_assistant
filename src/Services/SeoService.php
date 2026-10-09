@@ -32,15 +32,15 @@ class SeoService
                 'suggestion' => 'Add a descriptive page title (50-60 characters recommended)',
             ];
             $score -= 20;
-        } elseif (strlen($resource['pagetitle']) > 60) {
+        } elseif (mb_strlen($resource['pagetitle']) > 60) {
             $issues[] = [
                 'field' => 'pagetitle',
                 'severity' => 'warning',
-                'message' => 'Page title is too long (' . strlen($resource['pagetitle']) . ' characters)',
+                'message' => 'Page title is too long (' . mb_strlen($resource['pagetitle']) . ' characters)',
                 'suggestion' => 'Shorten the title to under 60 characters',
             ];
             $score -= 5;
-        } elseif (strlen($resource['pagetitle']) < 30) {
+        } elseif (mb_strlen($resource['pagetitle']) < 30) {
             $issues[] = [
                 'field' => 'pagetitle',
                 'severity' => 'info',
@@ -59,15 +59,15 @@ class SeoService
                 'suggestion' => 'Add a meta description (150-160 characters recommended)',
             ];
             $score -= 15;
-        } elseif (strlen($resource['description']) > 160) {
+        } elseif (mb_strlen($resource['description']) > 160) {
             $issues[] = [
                 'field' => 'description',
                 'severity' => 'warning',
-                'message' => 'Meta description is too long (' . strlen($resource['description']) . ' characters)',
+                'message' => 'Meta description is too long (' . mb_strlen($resource['description']) . ' characters)',
                 'suggestion' => 'Shorten to under 160 characters',
             ];
             $score -= 5;
-        } elseif (strlen($resource['description']) < 120) {
+        } elseif (mb_strlen($resource['description']) < 120) {
             $issues[] = [
                 'field' => 'description',
                 'severity' => 'info',
@@ -117,7 +117,7 @@ class SeoService
             ];
             $score -= 20;
         } else {
-            $wordCount = str_word_count(strip_tags($resource['content']));
+            $wordCount = count(preg_split('/\s+/u', trim(strip_tags($resource['content'])), -1, PREG_SPLIT_NO_EMPTY));
             if ($wordCount < 300) {
                 $issues[] = [
                     'field' => 'content',

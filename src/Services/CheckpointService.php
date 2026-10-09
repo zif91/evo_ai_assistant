@@ -27,7 +27,7 @@ class CheckpointService
             'entity_id' => $entityId,
             'field_name' => $fieldName,
             'old_value' => is_array($oldValue) ? $oldValue : ['value' => $oldValue],
-            'new_value' => is_array($newValue) ? $newValue : ($newValue ? ['value' => $newValue] : null),
+            'new_value' => is_array($newValue) ? $newValue : ($newValue !== null ? ['value' => $newValue] : null),
             'user_id' => evo()->getLoginUserID() ?? null,
             'session_id' => session_id(),
             'description' => $description,
@@ -124,6 +124,9 @@ class CheckpointService
         }
 
         $oldValue = $checkpoint->old_value;
+        if (!is_array($oldValue)) {
+            return false;
+        }
 
         switch ($checkpoint->entity_type) {
             case Checkpoint::TYPE_RESOURCE:
@@ -131,11 +134,16 @@ class CheckpointService
                 if ($resource && is_array($oldValue)) {
                     $resource->fill($oldValue);
                     $resource->save();
+                } else {
+                    return false;
                 }
                 break;
 
             case Checkpoint::TYPE_TV_VALUE:
-                if (is_array($oldValue) && isset($oldValue['tv_id'])) {
+                if (!isset($oldValue['tv_id']) || !array_key_exists('value', $oldValue)) {
+                    return false;
+                }
+                if (isset($oldValue['tv_id'])) {
                     $tvValue = SiteTmplvarContentvalue::where('contentid', $checkpoint->entity_id)
                         ->where('tmplvarid', $oldValue['tv_id'])
                         ->first();
@@ -162,6 +170,8 @@ class CheckpointService
                 if ($template && is_array($oldValue)) {
                     $template->fill($oldValue);
                     $template->save();
+                } else {
+                    return false;
                 }
                 break;
 
@@ -170,10 +180,29 @@ class CheckpointService
                 if ($tv && is_array($oldValue)) {
                     $tv->fill($oldValue);
                     $tv->save();
+                } else {
+                    return false;
                 }
                 break;
+
+            case 'blade_template':
+                $path = $oldValue['path'] ?? '';
+                $real = realpath($path);
+                $roots = array_filter([realpath(MODX_BASE_PATH . 'views'), realpath(resource_path('views'))]);
+                $allowed = false;
+                foreach ($roots as $root) {
+                    $allowed = $allowed || ($real && str_starts_with($real, $root . DIRECTORY_SEPARATOR));
+                }
+                if (!$allowed || !str_ends_with($real, '.blade.php') || !isset($oldValue['content'])
+                    || file_put_contents($real, $oldValue['content'], LOCK_EX) === false) {
+                    return false;
+                }
+                break;
+            default:
+                return false;
         }
 
+        evo()->clearCache('full');
         return $checkpoint->markAsRolledBack();
     }
 

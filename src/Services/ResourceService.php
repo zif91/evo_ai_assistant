@@ -79,12 +79,14 @@ class ResourceService
         }
 
         // Limit results
-        $limit = $criteria['limit'] ?? 50;
+        $limit = max(1, min(100, (int) ($criteria['limit'] ?? 50)));
         $query->limit($limit);
 
         // Order
         $orderBy = $criteria['orderBy'] ?? 'id';
         $orderDir = $criteria['orderDir'] ?? 'desc';
+        $orderBy = in_array($orderBy, ['id', 'pagetitle', 'menuindex', 'createdon', 'editedon'], true) ? $orderBy : 'id';
+        $orderDir = strtolower($orderDir) === 'asc' ? 'asc' : 'desc';
         $query->orderBy($orderBy, $orderDir);
 
         return $query->get();
@@ -177,6 +179,7 @@ class ResourceService
         // Apply changes
         $resource->fill($changes);
         $resource->save();
+        evo()->clearCache('full');
 
         return $resource->fresh();
     }
@@ -226,6 +229,7 @@ class ResourceService
             ]);
         }
 
+        evo()->clearCache('full');
         return true;
     }
 
@@ -270,6 +274,7 @@ class ResourceService
         $resource->publishedon = time();
         $resource->publishedby = evo()->getLoginUserID();
         $resource->save();
+        evo()->clearCache('full');
 
         return $resource->fresh();
     }
@@ -299,6 +304,7 @@ class ResourceService
 
         $resource->published = 0;
         $resource->save();
+        evo()->clearCache('full');
 
         return $resource->fresh();
     }
@@ -333,6 +339,7 @@ class ResourceService
 
         $resource = new SiteContent($data);
         $resource->save();
+        evo()->clearCache('full');
 
         return $resource->fresh();
     }

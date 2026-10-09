@@ -11,7 +11,7 @@
 }
 
 #ai-assistant-sidebar.ai-sidebar-closed {
-    transform: translateX(calc(100% - 48px));
+    transform: translateX(100%);
 }
 
 #ai-assistant-sidebar.ai-sidebar-open {

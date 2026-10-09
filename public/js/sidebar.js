@@ -93,7 +93,8 @@
      */
     function handleFrameMessage(event) {
         // Verify origin for security
-        if (!event.data || typeof event.data !== 'object') return;
+        if (event.origin !== window.location.origin || event.source !== frame.contentWindow
+            || !event.data || typeof event.data !== 'object') return;
 
         const { type, payload } = event.data;
 
@@ -112,16 +113,19 @@
                 if (payload && payload.url) {
                     const mainFrame = document.getElementById('mainframe');
                     if (mainFrame) {
-                        mainFrame.src = payload.url;
+                        const target = new URL(payload.url, window.location.href);
+                        if (target.origin === window.location.origin && /^https?:$/.test(target.protocol)) {
+                            mainFrame.src = target.href;
+                        }
                     }
                 }
                 break;
 
             case 'ai-assistant-edit-resource':
-                if (payload && payload.id) {
+                if (payload && Number.isInteger(Number(payload.id)) && Number(payload.id) > 0) {
                     const mainFrame = document.getElementById('mainframe');
                     if (mainFrame) {
-                        mainFrame.src = 'index.php?a=27&id=' + payload.id;
+                        mainFrame.src = 'index.php?a=27&id=' + Number(payload.id);
                     }
                 }
                 break;

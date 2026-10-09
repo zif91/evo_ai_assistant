@@ -1,0 +1,41 @@
+name: Compatibility
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  php:
+    name: PHP ${{ matrix.php }} / Evolution CE 3.1.31
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        php: ['8.1', '8.2', '8.3', '8.4']
+    steps:
+      - uses: actions/checkout@v4
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mbstring, pdo_sqlite, dom
+          coverage: none
+          tools: composer:v2
+      - run: composer validate --strict
+      - run: composer install --no-interaction --prefer-dist
+      - run: composer audit --locked
+      - name: Checkout pinned Evolution sources
+        run: |
+          git clone --depth 1 --branch 3.1.31 https://github.com/evocms-community/evolution.git /tmp/evolution
+          test "$(git -C /tmp/evolution rev-parse HEAD)" = "649f122d6b40b9a0aa146190ff48732c56bee89b"
+      - name: Lint PHP
+        run: find src assets config migrations tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - run: php -l install.php
+      - name: Integration checks
+        env:
+          EVO_SOURCE: /tmp/evolution
+        run: composer test
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+      - run: node --check public/js/panel.js && node --check public/js/sidebar.js

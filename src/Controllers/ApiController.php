@@ -32,7 +32,16 @@ class ApiController extends Controller
             return;
         }
 
-        $config = include __DIR__ . '/../../config/ai-assistant.php';
+        $runtime = include __DIR__ . '/../../config/ai-assistant.php';
+        $config = array_replace_recursive($runtime, config('ai-assistant', []));
+        // Resolve manager settings after Evolution loads them, preserving custom
+        // action flags, system prompt, iteration and token limits.
+        $config['provider'] = $runtime['provider'];
+        foreach ($runtime['providers'] as $name => $provider) {
+            foreach (['api_key', 'model', 'endpoint'] as $key) {
+                $config['providers'][$name][$key] = $provider[$key];
+            }
+        }
 
         $this->checkpointService = new CheckpointService();
         $this->aiService = new AiService($config);
@@ -52,6 +61,9 @@ class ApiController extends Controller
         $this->initServices();
         $message = $request->input('message', '');
         $context = $request->input('context', []);
+        if (!is_string($message) || strlen($message) > 32000 || !is_array($context)) {
+            return response()->json(['success' => false, 'error' => 'Invalid message or context.'], 422);
+        }
 
         if (empty($message)) {
             return response()->json([
@@ -61,7 +73,7 @@ class ApiController extends Controller
         }
 
         // Get conversation history from session
-        $history = session('ai_assistant_history', []);
+        $history = ($_SESSION['ai_assistant_history'] ?? []);
         $this->aiService->setHistory($history);
 
         // Set tool executor so AI can execute tools in multi-turn loop
@@ -73,7 +85,7 @@ class ApiController extends Controller
         $response = $this->aiService->chat($message, $context);
 
         // Save updated history
-        session(['ai_assistant_history' => $this->aiService->getHistory()]);
+        $_SESSION['ai_assistant_history'] = $this->aiService->getHistory();
 
         return response()->json([
             'success' => $response['success'] ?? true,
@@ -116,6 +128,9 @@ class ApiController extends Controller
         $name = $action['name'] ?? '';
         $args = $action['arguments'] ?? [];
 
+        if (!\EvolutionCMS\AiAssistant\Support\ActionPolicy::allowed($name, config('ai-assistant.actions', []))) {
+            return ['action' => $name, 'success' => false, 'error' => 'Action disabled by configuration'];
+        }
         try {
             $result = match ($name) {
                 'search_resources' => [
@@ -216,8 +231,12 @@ class ApiController extends Controller
                 ],
             };
 
+            if (array_key_exists('data', $result) && $result['data'] === null) {
+                $result['success'] = false;
+                $result['error'] = 'Entity not found or operation failed';
+            }
             return $result;
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             return [
                 'action' => $name,
                 'success' => false,
@@ -311,6 +330,7 @@ class ApiController extends Controller
      */
     public function publishResource(int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('publish_document')) {
             return response()->json([
                 'success' => false,
@@ -338,6 +358,7 @@ class ApiController extends Controller
      */
     public function unpublishResource(int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('publish_document')) {
             return response()->json([
                 'success' => false,
@@ -365,6 +386,7 @@ class ApiController extends Controller
      */
     public function getResourceTv(int $id): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => $this->resourceService->getTvValues($id),
@@ -376,6 +398,7 @@ class ApiController extends Controller
      */
     public function updateResourceTv(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('save_document')) {
             return response()->json([
                 'success' => false,
@@ -399,6 +422,7 @@ class ApiController extends Controller
      */
     public function listTv(): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => $this->tvService->getAll()->toArray(),
@@ -410,6 +434,7 @@ class ApiController extends Controller
      */
     public function createTv(Request $request): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('new_template') && !evo()->hasPermission('edit_template')) {
             return response()->json([
                 'success' => false,
@@ -437,6 +462,7 @@ class ApiController extends Controller
      */
     public function getTv(int $id): JsonResponse
     {
+        $this->initServices();
         $tv = $this->tvService->get($id);
 
         if (!$tv) {
@@ -457,6 +483,7 @@ class ApiController extends Controller
      */
     public function updateTv(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('edit_template')) {
             return response()->json([
                 'success' => false,
@@ -484,6 +511,7 @@ class ApiController extends Controller
      */
     public function bindTvToTemplates(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('edit_template')) {
             return response()->json([
                 'success' => false,
@@ -506,6 +534,7 @@ class ApiController extends Controller
      */
     public function listTemplates(): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => $this->templateService->getAll()->toArray(),
@@ -517,6 +546,7 @@ class ApiController extends Controller
      */
     public function getTemplate(int $id): JsonResponse
     {
+        $this->initServices();
         $template = $this->templateService->get($id);
 
         if (!$template) {
@@ -537,6 +567,7 @@ class ApiController extends Controller
      */
     public function updateTemplate(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('save_template')) {
             return response()->json([
                 'success' => false,
@@ -564,6 +595,7 @@ class ApiController extends Controller
      */
     public function updateBladeTemplate(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('save_template')) {
             return response()->json([
                 'success' => false,
@@ -586,6 +618,7 @@ class ApiController extends Controller
      */
     public function analyzeSeo(int $id): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => $this->seoService->analyze($id),
@@ -597,6 +630,7 @@ class ApiController extends Controller
      */
     public function optimizeSeo(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         if (!evo()->hasPermission('save_document')) {
             return response()->json([
                 'success' => false,
@@ -617,6 +651,7 @@ class ApiController extends Controller
      */
     public function getSeoSuggestions(Request $request, int $id): JsonResponse
     {
+        $this->initServices();
         $focusKeyword = $request->input('focus_keyword');
 
         return response()->json([
@@ -632,6 +667,7 @@ class ApiController extends Controller
      */
     public function listCheckpoints(Request $request): JsonResponse
     {
+        $this->initServices();
         $entityType = $request->input('entity_type');
         $entityId = $request->input('entity_id');
 
@@ -661,6 +697,7 @@ class ApiController extends Controller
      */
     public function rollbackCheckpoint(int $id): JsonResponse
     {
+        $this->initServices();
         $checkpoint = Checkpoint::find($id);
 
         if (!$checkpoint) {
@@ -682,6 +719,7 @@ class ApiController extends Controller
      */
     public function rollbackSession(): JsonResponse
     {
+        $this->initServices();
         $count = $this->checkpointService->rollbackSession(session_id());
 
         return response()->json([
@@ -731,9 +769,10 @@ class ApiController extends Controller
      */
     public function getHistory(): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
-            'data' => session('ai_assistant_history', []),
+            'data' => ($_SESSION['ai_assistant_history'] ?? []),
         ]);
     }
 
@@ -742,7 +781,8 @@ class ApiController extends Controller
      */
     public function clearHistory(): JsonResponse
     {
-        session()->forget('ai_assistant_history');
+        $this->initServices();
+        unset($_SESSION['ai_assistant_history']);
 
         return response()->json([
             'success' => true,
@@ -754,6 +794,7 @@ class ApiController extends Controller
      */
     public function getSettings(): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => [
@@ -770,6 +811,7 @@ class ApiController extends Controller
      */
     public function updateSettings(Request $request): JsonResponse
     {
+        $this->initServices();
         // For now, settings are managed via config file
         return response()->json([
             'success' => false,
@@ -866,10 +908,11 @@ class ApiController extends Controller
      */
     public function status(): JsonResponse
     {
+        $this->initServices();
         return response()->json([
             'success' => true,
             'data' => [
-                'version' => '1.0.0',
+                'version' => '1.1.0',
                 'ai_configured' => $this->aiService->isConfigured(),
                 'user' => [
                     'id' => evo()->getLoginUserID(),

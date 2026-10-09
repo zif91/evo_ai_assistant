@@ -88,6 +88,7 @@ class TemplateService
 
         $template->fill($changes);
         $template->save();
+        evo()->clearCache('full');
 
         return $template->fresh();
     }
@@ -98,7 +99,7 @@ class TemplateService
     public function isBladeTemplate(SiteTemplate $template): bool
     {
         // Check if content references a Blade view
-        $content = trim($template->content);
+        $content = trim((string) $template->content);
 
         // Check for @extends directive
         if (str_starts_with($content, '@extends')) {
@@ -187,7 +188,9 @@ class TemplateService
             );
         }
 
-        return File::put($path, $content) !== false;
+        $saved = File::put($path, $content) !== false;
+        if ($saved) evo()->clearCache('full');
+        return $saved;
     }
 
     /**
@@ -195,18 +198,14 @@ class TemplateService
      */
     protected function resolveViewPath(string $viewName): ?string
     {
-        // Convert dot notation to path
+        if (!preg_match('/^[a-zA-Z0-9_-]+(?:[.\/][a-zA-Z0-9_-]+)*$/D', $viewName)) {
+            return null;
+        }
         $viewName = str_replace('.', '/', $viewName);
-
-        // Check in views directory
-        $paths = [
-            base_path('views/' . $viewName . '.blade.php'),
-            resource_path('views/' . $viewName . '.blade.php'),
-            MODX_BASE_PATH . 'views/' . $viewName . '.blade.php',
-        ];
-
-        foreach ($paths as $path) {
-            if (File::exists($path)) {
+        foreach ([MODX_BASE_PATH . 'views', resource_path('views')] as $root) {
+            $root = realpath($root);
+            $path = $root ? realpath($root . '/' . $viewName . '.blade.php') : false;
+            if ($path && str_starts_with($path, $root . DIRECTORY_SEPARATOR) && is_file($path)) {
                 return $path;
             }
         }
@@ -242,6 +241,7 @@ class TemplateService
 
         $template = new SiteTemplate($data);
         $template->save();
+        evo()->clearCache('full');
 
         return $template->fresh();
     }

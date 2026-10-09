@@ -3,6 +3,7 @@
 namespace EvolutionCMS\AiAssistant\Services;
 
 use Illuminate\Support\Facades\Http;
+use EvolutionCMS\AiAssistant\Support\ActionPolicy;
 use Illuminate\Support\Facades\Log;
 
 class AiService
@@ -23,6 +24,9 @@ class AiService
     protected function executeTool(string $name, array $args): array
     {
         // This will be set by the controller
+        if (!ActionPolicy::allowed($name, $this->config['actions'] ?? [])) {
+            return ['success' => false, 'error' => 'Action disabled by configuration'];
+        }
         if ($this->toolExecutor) {
             return call_user_func($this->toolExecutor, $name, $args);
         }
@@ -41,14 +45,10 @@ class AiService
      */
     protected function debugLog(string $msg, array $data = []): void
     {
-        $logFile = storage_path('logs/ai_assistant_debug.log');
-        $timestamp = date('Y-m-d H:i:s');
-        $entry = "[$timestamp] $msg\n";
-        if (!empty($data)) {
-            $entry .= json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE) . "\n";
+        if (!empty($this->config['debug'])) {
+            // Never persist prompts, CMS content, tool arguments or API responses.
+            Log::debug('AI Assistant: ' . $msg);
         }
-        $entry .= "---\n";
-        file_put_contents($logFile, $entry, FILE_APPEND);
     }
 
     /**
@@ -56,8 +56,11 @@ class AiService
      */
     public function chat(string $message, array $context = []): array
     {
+        if (!$this->isConfigured()) {
+            return ['success' => false, 'content' => '', 'actions' => [], 'error' => 'AI Assistant is not configured'];
+        }
         $systemPrompt = $this->config['system_prompt'] ?? '';
-        $maxIterations = 15; // Allow complex multi-step tasks
+        $maxIterations = max(1, min(30, (int) ($this->config['max_iterations'] ?? 15))); // Allow complex multi-step tasks
 
         $this->debugLog("=== NEW CHAT REQUEST ===", ['message' => $message]);
 
@@ -115,6 +118,9 @@ class AiService
                 foreach ($response['actions'] as $action) {
                     $toolName = $action['name'] ?? '';
                     $toolArgs = $action['arguments'] ?? [];
+                    if (!is_array($toolArgs)) {
+                        throw new \RuntimeException('Invalid tool arguments');
+                    }
                     $toolId = $action['id'] ?? $toolName;
 
                     // Skip if no tool name
@@ -142,7 +148,7 @@ class AiService
                 }
 
                 // Add assistant message with tool calls to conversation
-                $messages[] = [
+                $messages[] = $response['assistant_message'] ?? [
                     'role' => 'assistant',
                     'content' => $finalContent,
                     'tool_calls' => array_map(function($a) {
@@ -151,7 +157,7 @@ class AiService
                             'type' => 'function',
                             'function' => [
                                 'name' => $a['name'],
-                                'arguments' => json_encode($a['arguments'] ?? []),
+                                'arguments' => json_encode((object) ($a['arguments'] ?? [])),
                             ],
                         ];
                     }, $response['actions']),
@@ -169,6 +175,12 @@ class AiService
                 $this->debugLog("Added tool results to messages, continuing loop");
             }
 
+            if ($i >= $maxIterations) {
+                $this->remember($message, $finalContent . '\nStep limit reached.', $allActions);
+                return ['success' => false, 'content' => $finalContent, 'actions' => $allActions,
+                    'error' => 'Step limit reached. Some actions may already be saved; review the results before continuing.'];
+            }
+
             $this->debugLog("=== CHAT COMPLETE ===", [
                 'iterations' => $i + 1,
                 'total_actions' => count($allActions),
@@ -176,17 +188,17 @@ class AiService
             ]);
 
             // Save to history
-            $this->conversationHistory[] = ['role' => 'user', 'content' => $message];
-            $this->conversationHistory[] = ['role' => 'assistant', 'content' => $finalContent];
+            $this->remember($message, $finalContent, $allActions);
 
             return [
                 'success' => true,
                 'content' => $finalContent,
                 'actions' => $allActions,
             ];
-        } catch (\Exception $e) {
+        } catch (\Throwable $e) {
             $this->debugLog("ERROR", ['error' => $e->getMessage(), 'trace' => $e->getTraceAsString()]);
-            Log::error('AI Service error: ' . $e->getMessage());
+            Log::error('AI Assistant provider request failed');
+            $this->remember($message, 'Request failed. Some actions may already have completed.', $allActions);
 
             return [
                 'success' => false,
@@ -200,6 +212,15 @@ class AiService
     /**
      * Call OpenAI API (also works with OpenRouter and other OpenAI-compatible APIs)
      */
+    private function decodeArguments(string $json): array
+    {
+        $value = json_decode($json, true, 512, JSON_THROW_ON_ERROR);
+        if (!is_array($value) || !str_starts_with(ltrim($json), '{')) {
+            throw new \RuntimeException('Tool arguments must be a JSON object');
+        }
+        return $value;
+    }
+
     protected function callOpenAI(array $messages): array
     {
         $providerConfig = $this->config['providers']['openai'];
@@ -212,7 +233,7 @@ class AiService
         ];
 
         // Add OpenRouter-specific headers if using OpenRouter
-        if (str_contains($endpoint, 'openrouter.ai')) {
+        if (parse_url($endpoint, PHP_URL_HOST) === 'openrouter.ai') {
             $headers['HTTP-Referer'] = defined('MODX_SITE_URL') ? MODX_SITE_URL : 'http://localhost';
             $headers['X-Title'] = 'Evolution CMS AI Assistant';
         }
@@ -222,10 +243,22 @@ class AiService
             'model' => $providerConfig['model'],
             'messages' => $messages,
             'max_tokens' => $providerConfig['max_tokens'],
-            'temperature' => $providerConfig['temperature'],
             'tools' => $this->getOpenAIToolDefinitions(),
             'tool_choice' => 'auto',
         ];
+
+        if (!$requestBody['tools']) {
+            unset($requestBody['tools'], $requestBody['tool_choice']);
+        }
+        $host = parse_url($endpoint, PHP_URL_HOST);
+        if ($host === 'api.openai.com') {
+            $requestBody['max_completion_tokens'] = $requestBody['max_tokens'];
+            unset($requestBody['max_tokens']);
+            // Reasoning models reject custom temperature; omit it by default.
+        }
+        if ($host === 'openrouter.ai') {
+            $requestBody['provider'] = ['require_parameters' => true];
+        }
 
         $response = Http::withHeaders($headers)
             ->timeout(120)
@@ -236,6 +269,9 @@ class AiService
         }
 
         $data = $response->json();
+        if (!is_array($data) || isset($data['error']) || empty($data['choices'][0]['message'])) {
+            throw new \RuntimeException('AI API returned an invalid response');
+        }
 
         // Debug raw response
         $this->debugLog("RAW API RESPONSE", [
@@ -247,6 +283,9 @@ class AiService
         $choice = $data['choices'][0] ?? [];
         $assistantMessage = $choice['message'] ?? [];
 
+        if (in_array($choice['finish_reason'] ?? '', ['length', 'content_filter'], true)) {
+            throw new \RuntimeException('Model response was truncated or filtered');
+        }
         $content = $assistantMessage['content'] ?? '';
         $actions = [];
 
@@ -256,7 +295,7 @@ class AiService
             $actions[] = [
                 'type' => 'function',
                 'name' => $functionCall['name'],
-                'arguments' => json_decode($functionCall['arguments'], true) ?? [],
+                'arguments' => $this->decodeArguments($functionCall['arguments'] ?? '{}'),
             ];
         }
 
@@ -265,12 +304,15 @@ class AiService
             $this->debugLog("TOOL_CALLS found", ['tool_calls' => $assistantMessage['tool_calls']]);
 
             foreach ($assistantMessage['tool_calls'] as $toolCall) {
-                if (($toolCall['type'] ?? '') === 'function' && !empty($toolCall['function']['name'])) {
+                if (($toolCall['type'] ?? '') !== 'function' || empty($toolCall['function']['name']) || empty($toolCall['id'])) {
+                    throw new \RuntimeException('Invalid tool call returned by model');
+                }
+                if (($toolCall['type'] ?? '') === 'function') {
                     $actions[] = [
                         'type' => 'function',
-                        'id' => $toolCall['id'] ?? uniqid('tool_'),
+                        'id' => $toolCall['id'],
                         'name' => $toolCall['function']['name'],
-                        'arguments' => json_decode($toolCall['function']['arguments'] ?? '{}', true) ?? [],
+                        'arguments' => $this->decodeArguments($toolCall['function']['arguments'] ?? '{}'),
                     ];
                 }
             }
@@ -281,6 +323,7 @@ class AiService
             'content' => $content,
             'actions' => $actions,
             'raw' => $data,
+            'assistant_message' => isset($assistantMessage['tool_calls']) ? $assistantMessage : null,
         ];
     }
 
@@ -298,11 +341,27 @@ class AiService
         foreach ($messages as $msg) {
             if ($msg['role'] === 'system') {
                 $systemContent .= $msg['content'] . "\n\n";
+            } elseif ($msg['role'] === 'tool') {
+                $block = ['type' => 'tool_result', 'tool_use_id' => $msg['tool_call_id'], 'content' => $msg['content']];
+                $last = count($anthropicMessages) - 1;
+                if ($last >= 0 && $anthropicMessages[$last]['role'] === 'user' && is_array($anthropicMessages[$last]['content'])) {
+                    $anthropicMessages[$last]['content'][] = $block;
+                } else {
+                    $anthropicMessages[] = ['role' => 'user', 'content' => [$block]];
+                }
+            } elseif (!empty($msg['tool_calls'])) {
+                $blocks = [];
+                if (!empty($msg['content'])) {
+                    $blocks[] = ['type' => 'text', 'text' => $msg['content']];
+                }
+                foreach ($msg['tool_calls'] as $call) {
+                    $blocks[] = ['type' => 'tool_use', 'id' => $call['id'],
+                        'name' => $call['function']['name'],
+                        'input' => (object) $this->decodeArguments($call['function']['arguments'])];
+                }
+                $anthropicMessages[] = ['role' => 'assistant', 'content' => $blocks];
             } else {
-                $anthropicMessages[] = [
-                    'role' => $msg['role'],
-                    'content' => $msg['content'],
-                ];
+                $anthropicMessages[] = ['role' => $msg['role'], 'content' => $msg['content']];
             }
         }
 
@@ -323,6 +382,12 @@ class AiService
         }
 
         $data = $response->json();
+        if (!is_array($data) || isset($data['error']) || empty($data['content'])) {
+            throw new \RuntimeException('Anthropic returned an invalid response');
+        }
+        if (($data['stop_reason'] ?? '') === 'max_tokens') {
+            throw new \RuntimeException('Model response was truncated');
+        }
         $content = '';
         $actions = [];
 
@@ -352,7 +417,7 @@ class AiService
      */
     protected function getOpenAIToolDefinitions(): array
     {
-        $functions = $this->getToolDefinitions();
+        $functions = array_filter($this->getToolDefinitions(), fn($tool) => ActionPolicy::allowed($tool['name'], $this->config['actions'] ?? []));
         $tools = [];
         foreach ($functions as $func) {
             $tools[] = [
@@ -710,7 +775,7 @@ class AiService
      */
     protected function getAnthropicToolDefinitions(): array
     {
-        $openAiTools = $this->getToolDefinitions();
+        $openAiTools = array_filter($this->getToolDefinitions(), fn($tool) => ActionPolicy::allowed($tool['name'], $this->config['actions'] ?? []));
         $anthropicTools = [];
 
         foreach ($openAiTools as $tool) {
@@ -735,6 +800,18 @@ class AiService
     /**
      * Set conversation history
      */
+    private function remember(string $message, string $content, array $actions): void
+    {
+        $this->conversationHistory[] = ['role' => 'user', 'content' => $message];
+        if ($actions) {
+            $summary = array_map(static fn($action) => array_intersect_key($action,
+                array_flip(['name', 'action', 'success', 'id', 'message', 'error'])), $actions);
+            $content .= "\nAction results: " . json_encode($summary, JSON_UNESCAPED_UNICODE);
+        }
+        $this->conversationHistory[] = ['role' => 'assistant', 'content' => $content];
+        $this->conversationHistory = array_slice($this->conversationHistory, -10);
+    }
+
     public function setHistory(array $history): void
     {
         $this->conversationHistory = $history;

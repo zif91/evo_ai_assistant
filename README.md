@@ -1,173 +1,132 @@
-# AI Assistant for Evolution CMS 3.x
+# AI Assistant for Evolution CMS
 
-AI-ассистент для управления контентом Evolution CMS через чат-интерфейс.
+Ассистент в панели управления: поиск и редактирование страниц, создание разделов,
+шаблонов и TV, привязка TV, публикация, SEO-анализ и откат изменений.
+Многошаговые задачи выполняются через tool calling.
 
-## Возможности
+## Совместимость
 
-- Создание страниц, шаблонов, TV (Template Variables)
-- Поиск и редактирование контента
-- Привязка TV к шаблонам
-- SEO-анализ страниц
-- Multi-turn agent: выполняет сложные задачи в несколько шагов
-- Сохранение истории чата в localStorage
+Целевая версия — **Evolution CE 3.1.31** из
+[evocms-community/evolution](https://github.com/evocms-community/evolution/releases/tag/3.1.31).
+Это последний community-релиз, проверенный 9 октября 2026 года; прежнее требование
+«Evolution 3.2+» было ошибочным для этого репозитория.
 
-## Требования
+- PHP **8.1–8.4**, JSON, mbstring; зависимости CMS и Composer 2.
+- Illuminate **8.83**, Guzzle 7 — как в community-ветке Evolution 3.1.x.
+- OpenRouter, OpenAI-compatible **Chat Completions**, прямой Anthropic **Messages**.
+- API-ключ и баланс выбранного провайдера; модель с поддержкой инструментов.
+- Доступ: только вошедший в менеджер **администратор (роль 1)**. Редакторы и
+  веб-пользователи не получают API-доступ: шаблоны и Blade могут выполнять PHP.
 
-- Evolution CMS 3.2+
-- PHP 8.1+
-- Composer 2
-- API ключ OpenRouter (https://openrouter.ai)
+[GitHub Actions](https://github.com/zif91/evo_ai_assistant/actions/workflows/compatibility.yml)
+проверяет матрицу PHP 8.1–8.4. Тесты используют настоящие модели и ServiceProvider
+Evolution 3.1.31, Illuminate 8 и изолированную SQLite-базу. Это не полная установка
+CMS с MySQL и браузерной авторизацией. API провайдеров в тестах подменены:
+платные запросы с реальными ключами не выполняются. В Illuminate 8 на PHP 8.4 есть
+предупреждения deprecation; Evolution 3.1.31 исключает их из error_reporting.
+Совместимость с Evolution 1.4, другими форками и PHP 8.5 не заявляется.
 
----
+## Установка и обновление
 
-## Установка (автоматическая)
+1. Сохраните резервную копию БД и файлов существующей установки.
+2. Разместите этот репозиторий в `core/custom/packages/ai-assistant/`.
+3. Из корня сайта запустите тем же PHP, которым работает CMS:
 
-### Шаг 1. Загрузка файлов
+   ```sh
+   php core/custom/packages/ai-assistant/install.php
+   cd core
+   composer dump-autoload
+   php artisan package:discover
+   php artisan cache:clear-full
+   ```
 
-Скопируйте папку `ai-assistant` в:
-```
-/core/custom/packages/ai-assistant/
-```
+4. В менеджере откройте **Модули → AI Assistant Settings**. Укажите ключ,
+   протокол API, Base URL и Model ID. Перезагрузите менеджер.
 
-### Шаг 2. Запуск установщика
+Установщик работает **только из CLI**. Он создаёт недостающие таблицы,
+обновляет плагин, модуль и публичные файлы, добавляет PSR-4 и provider в
+`core/custom/composer.json`. Перед изменением существующего composer.json
+сохраняется `.bak`. Установщик не переписывает `custom/config/app.php` или роуты
+других пакетов. Provider использует штатную регистрацию `extra.laravel.providers`.
+Обычное открытие сайта не запускает установку и не меняет БД.
 
-Откройте в браузере:
-```
-https://ваш-сайт.ru/core/custom/packages/ai-assistant/install.php
-```
+Для обновления замените файлы пакета и повторите команды. Сохранённый ключ,
+провайдер, URL и выбранная модель остаются прежними. Старые записи `ai_checkpoints`
+копируются в правильную таблицу `ai_assistant_checkpoints`, если она пуста;
+исходная таблица сохраняется. Повторная установка не дублирует модуль и плагин.
+Откат из очень старых записей зависит от полноты сохранённых в них данных.
 
-### Шаг 3. Настройка
+Если ранее вручную добавляли маршруты из старого README в `core/custom/routes.php`,
+удалите **только группу AI Assistant**: все маршруты теперь регистрирует provider.
+После обновления откройте панель заново, чтобы получить CSRF-токен.
 
-1. Введите ваш API ключ OpenRouter (получить на https://openrouter.ai/keys)
-2. Выберите модель (рекомендуется `openai/gpt-4o-mini`)
-3. Нажмите **Install**
+## Модели и настройки
 
-### Шаг 4. Очистка кеша
+В настройках есть живой [каталог OpenRouter](https://openrouter.ai/docs/api/api-reference/models/list-all-models-and-their-properties):
+модели с поддержкой `tools` и текстовым выходом, цены входа/выхода за миллион
+токенов, размер контекста в ответе каталога. Список кешируется на сутки; кнопка
+**«Обновить каталог»** обновляет его сразу. При сбое используется последний кеш
+или поставляемый снимок `config/models.json`, с датой и пометкой об устаревании.
+Пакет не считает наличие модели в каталоге гарантией её доступности для вашего ключа.
 
-В админке: **Настройки** → **Очистить кеш**
+Новая установка выбирает `openai/gpt-5.4-mini` через OpenRouter. В снимке также
+есть GPT-5.6 Sol, Claude Sonnet/Haiku 5.5, Gemini 3.8 Flash, DeepSeek V4.1 Flash,
+Grok 4.7 — ID и цены получены из API каталога 9 октября 2026 года. Актуальный
+список загружается из API, а не определяется этим перечислением.
 
-**Готово!** В админке появится фиолетовая кнопка AI Assistant справа.
+| Подключение | Протокол | Base URL | Model ID |
+| --- | --- | --- | --- |
+| OpenRouter | OpenAI-compatible | `https://openrouter.ai/api/v1` | ID из каталога с префиксом провайдера |
+| OpenAI напрямую | OpenAI-compatible | `https://api.openai.com/v1` | ID из аккаунта OpenAI без `openai/` |
+| Anthropic напрямую | Anthropic | Фиксированный Messages endpoint | ID из аккаунта Anthropic без `anthropic/` |
+| Другой совместимый API | OpenAI-compatible | Его HTTPS Base URL | Поддерживаемый им ID |
 
----
+Можно вручную указать любую модель. Выбор из каталога переключает URL и протокол
+на OpenRouter. Пустое поле ключа при сохранении оставляет прежний ключ;
+сохранённый секрет не выводится в HTML формы. Нативный Gemini, Azure со своим
+форматом URL/заголовков и OpenAI Responses API отдельно не реализованы.
 
-## Использование
+## Работа с ассистентом
 
-1. Нажмите на фиолетовую кнопку AI Assistant справа
-2. Примеры команд:
-   - `Покажи все шаблоны`
-   - `Создай страницу Контакты`
-   - `Создай раздел Услуги с дочерними Услуга1 и Услуга2`
-   - `Создай шаблон Продукт с TV цена и описание`
+Нажмите фиолетовую кнопку справа или **Ctrl/Cmd + Shift + A**.
 
----
+- «Покажи все шаблоны и TV».
+- «Создай шаблон Продукт, TV price и раздел Каталог с двумя дочерними страницами».
+- «Найди страницы с текстом …».
+- «Проанализируй SEO страницы #12».
 
-## Рекомендуемые модели OpenRouter
+Новые страницы по умолчанию создаются неопубликованными. Изменения выполняются
+сразу в пределах команды администратора; проверяйте результаты инструментов.
+При ошибке или достижении лимита шагов часть действий уже могла сохраниться:
+панель показывает их результаты, а ассистент сохраняет краткий итог в истории.
+Чат хранится в сессии менеджера, последние 10 сообщений используются как контекст.
 
-| Модель | Цена (за 1M токенов) | Tool Calling |
-|--------|----------------------|--------------|
-| `openai/gpt-4o-mini` | $0.15 / $0.60 | Отлично |
-| `anthropic/claude-sonnet-4` | $3 / $15 | Отлично |
-| `anthropic/claude-haiku-4` | $0.80 / $4 | Хорошо |
-| `google/gemini-2.5-flash` | $0.15 / $0.60 | Хорошо |
-| `deepseek/deepseek-chat-v3` | $0.14 / $0.28 | Хорошо |
-| `x-ai/grok-3-fast` | $5 / $25 | Хорошо |
-| `mistralai/devstral` | $0.10 / $0.30 | Хорошо |
+Изменение полей страницы, TV, шаблона и Blade сохраняет контрольную точку.
+Кнопка истории открывает список изменений с откатом. Откат — восстановление
+сохранённых полей или файла, а не удаление созданных страниц, шаблонов и TV.
+Создание сущностей и привязки TV не имеют автоматического отката.
+После изменений очищается кеш CMS. Путь Blade ограничен каталогами views,
+включая проверку реального пути символических ссылок.
 
----
+В `core/custom/config/ai-assistant.php` можно переопределить флаги `actions`,
+`max_iterations` (1–30, по умолчанию 15), настройки интерфейса. Выключенные группы
+инструментов скрываются от модели и блокируются на API. `debug` по умолчанию
+выключен; при включении журналируются этапы без промптов, ответов и содержимого CMS.
+Системные настройки провайдера загружаются после инициализации Evolution.
 
-## Изменение настроек
+## Проверка разработки
 
-После установки настройки можно изменить:
-- В админке: **Модули** → **AI Assistant Settings**
-
----
-
-## Решение проблем
-
-### "Unauthorized"
-Залогиньтесь в админку Evolution CMS.
-
-### "AI Assistant is not configured"
-Проверьте API ключ в **Модули** → **AI Assistant Settings**.
-
-### Пустой ответ / ошибка от AI
-1. Проверьте API ключ OpenRouter
-2. Убедитесь что выбрана модель с поддержкой tool calling
-3. Проверьте баланс на OpenRouter
-
-### Tool calls без имени функции
-Используйте модель `openai/gpt-4o-mini` или `anthropic/claude-sonnet-4`.
-
----
-
-## Ручная установка
-
-<details>
-<summary>Если автоматическая установка не работает</summary>
-
-### Роуты (`/core/custom/routes.php`):
-
-```php
-<?php
-Route::group(['prefix' => 'ai-assistant', 'middleware' => [\EvolutionCMS\AiAssistant\Http\Middleware\AiAssistantAuth::class]], function() {
-    Route::get('/', [\EvolutionCMS\AiAssistant\Controllers\PanelController::class, 'index']);
-    Route::post('/api/chat', [\EvolutionCMS\AiAssistant\Controllers\ApiController::class, 'chat']);
-    Route::delete('/api/history', [\EvolutionCMS\AiAssistant\Controllers\ApiController::class, 'clearHistory']);
-    Route::get('/api/resources', [\EvolutionCMS\AiAssistant\Controllers\ApiController::class, 'searchResources']);
-    Route::get('/api/templates', [\EvolutionCMS\AiAssistant\Controllers\ApiController::class, 'listTemplates']);
-    Route::get('/api/tv', [\EvolutionCMS\AiAssistant\Controllers\ApiController::class, 'listTv']);
-});
-```
-
-### Service Provider (`/core/custom/config/app.php`):
-
-```php
-<?php
-return [
-    'providers' => [
-        EvolutionCMS\AiAssistant\AiAssistantServiceProvider::class,
-    ],
-];
+```sh
+composer install
+git clone --depth 1 --branch 3.1.31 https://github.com/evocms-community/evolution.git /tmp/evolution
+EVO_SOURCE=/tmp/evolution composer test
+composer validate --strict
+composer audit --locked
+node --check public/js/panel.js
+node --check public/js/sidebar.js
 ```
 
-### SQL (замените `evo_` на ваш префикс):
-
-```sql
-CREATE TABLE IF NOT EXISTS `evo_ai_checkpoints` (
-    `id` int(11) unsigned NOT NULL AUTO_INCREMENT,
-    `session_id` varchar(255) DEFAULT NULL,
-    `entity_type` varchar(50) NOT NULL,
-    `entity_id` int(11) unsigned NOT NULL,
-    `field_name` varchar(100) DEFAULT NULL,
-    `old_value` longtext,
-    `new_value` longtext,
-    `description` varchar(255) DEFAULT NULL,
-    `created_at` timestamp NULL DEFAULT CURRENT_TIMESTAMP,
-    `updated_at` timestamp NULL DEFAULT NULL,
-    PRIMARY KEY (`id`),
-    KEY `entity_type_id` (`entity_type`, `entity_id`),
-    KEY `session_id` (`session_id`)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
-
-INSERT INTO `evo_system_settings` (`setting_name`, `setting_value`) VALUES
-('ai_assistant_provider', 'openai'),
-('ai_assistant_api_key', 'YOUR-API-KEY'),
-('ai_assistant_api_url', 'https://openrouter.ai/api/v1'),
-('ai_assistant_model', 'openai/gpt-4o-mini');
-```
-
-### Плагин
-
-Создайте плагин `AI Assistant` с событием `OnManagerMainFrameHeaderHTMLBlock` - код см. в README на GitHub.
-
-</details>
-
----
-
-## Лицензия
-
-MIT License
-
-## Автор
-
-Created with Claude Code
+Проверки охватывают повторную установку, сохранение ключа, модели CMS, вложенные
+страницы, TV и шаблоны, публикацию, откат, Blade, CSRF и права, загрузку маршрутов
+и панели, многошаговые ответы OpenRouter/Anthropic, reasoning metadata, ошибочные
+аргументы инструментов, ошибки провайдера и лимит шагов.

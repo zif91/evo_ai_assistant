@@ -1,3 +1,4 @@
+<?php
 /**
  * AI Assistant Plugin for Evolution CMS
  *
@@ -8,25 +9,26 @@
  * @author      Evolution CMS Community
  * @license     MIT
  *
- * Events: OnManagerFrameLoader, OnManagerTopPrerender
+ * Events: OnManagerMainFrameHeaderHTMLBlock
  */
 
 if (!defined('IN_MANAGER_MODE') || IN_MANAGER_MODE !== true) {
     return;
 }
 
+if (!\EvolutionCMS\AiAssistant\Support\ManagerSecurity::allowed()) {
+    return;
+}
+
 $e = evo()->event;
 
 switch ($e->name) {
-    case 'OnManagerTopPrerender':
+    case 'OnManagerMainFrameHeaderHTMLBlock':
         // Add CSS to head
         $output = '
         <link rel="stylesheet" href="' . MODX_SITE_URL . 'assets/ai-assistant/css/sidebar.css">
         ';
         $e->output($output);
-        break;
-
-    case 'OnManagerFrameLoader':
         // Inject the sidebar HTML and JS
         $panelUrl = MODX_SITE_URL . 'ai-assistant/panel';
         $output = '
@@ -44,6 +46,6 @@ switch ($e->name) {
         </div>
         <script src="' . MODX_SITE_URL . 'assets/ai-assistant/js/sidebar.js"></script>
         ';
-        echo $output;
+        $e->output($output);
         break;
 }

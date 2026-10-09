@@ -1,255 +1,73 @@
 <?php
-/**
- * AI Assistant Settings Module
- *
- * This module provides a UI for configuring AI Assistant settings
- * Settings are stored in Evolution CMS system_settings table
- */
 
-if (!defined('IN_MANAGER_MODE') || IN_MANAGER_MODE !== true) {
-    exit('Access denied');
+use EvolutionCMS\AiAssistant\Services\ModelCatalog;
+use EvolutionCMS\AiAssistant\Support\ManagerSecurity;
+use Illuminate\Support\Facades\DB;
+
+if (!defined('IN_MANAGER_MODE') || !IN_MANAGER_MODE || !ManagerSecurity::allowed()) {
+    http_response_code(403);
+    exit('Administrator access required');
 }
-
-$modx = evo();
-
-// Handle form submission
-if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save'])) {
-    $settings = [
-        'ai_assistant_provider' => $_POST['ai_assistant_provider'] ?? 'openai',
-        'ai_assistant_api_key' => $_POST['ai_assistant_api_key'] ?? '',
-        'ai_assistant_api_url' => $_POST['ai_assistant_api_url'] ?? 'https://api.openai.com/v1',
-        'ai_assistant_model' => $_POST['ai_assistant_model'] ?? 'gpt-4',
-    ];
-
-    foreach ($settings as $key => $value) {
-        // Check if setting exists
-        $result = $modx->db->select('setting_name', $modx->getDatabase()->getFullTableName('system_settings'), "setting_name='" . $modx->db->escape($key) . "'");
-
-        if ($modx->db->getRecordCount($result) > 0) {
-            // Update
-            $modx->db->update(
-                ['setting_value' => $modx->db->escape($value)],
-                $modx->getDatabase()->getFullTableName('system_settings'),
-                "setting_name='" . $modx->db->escape($key) . "'"
-            );
+$escape = static fn($value) => htmlspecialchars((string) $value, ENT_QUOTES | ENT_SUBSTITUTE, 'UTF-8');
+$error = '';
+$success = false;
+$names = ['provider', 'api_key', 'api_url', 'model'];
+$values = [];
+foreach ($names as $name) {
+    $values[$name] = DB::table('system_settings')->where('setting_name', 'ai_assistant_' . $name)->value('setting_value') ?? '';
+}
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+    if (!ManagerSecurity::validToken($_POST['_ai_token'] ?? null)) {
+        $error = 'CSRF token mismatch. Reload settings.';
+    } elseif (isset($_POST['save'])) {
+        $provider = $_POST['provider'] ?? '';
+        $url = rtrim(trim($_POST['api_url'] ?? ''), '/');
+        $model = trim($_POST['model'] ?? '');
+        $key = trim($_POST['api_key'] ?? '');
+        if (!in_array($provider, ['openai', 'anthropic'], true) || !$model || strlen($model) > 200
+            || !filter_var($url, FILTER_VALIDATE_URL) || parse_url($url, PHP_URL_SCHEME) !== 'https'
+            || parse_url($url, PHP_URL_USER) || parse_url($url, PHP_URL_QUERY) || parse_url($url, PHP_URL_FRAGMENT)) {
+            $error = 'Choose a provider, enter a model ID and a valid HTTPS API base URL.';
         } else {
-            // Insert
-            $modx->db->insert(
-                ['setting_name' => $key, 'setting_value' => $modx->db->escape($value)],
-                $modx->getDatabase()->getFullTableName('system_settings')
-            );
+            $values = ['provider' => $provider, 'api_url' => $url, 'model' => $model, 'api_key' => $key ?: $values['api_key']];
+            DB::transaction(function () use ($values) {
+                foreach ($values as $name => $value) {
+                    DB::table('system_settings')->updateOrInsert(['setting_name' => 'ai_assistant_' . $name], ['setting_value' => $value]);
+                }
+            });
+            evo()->clearCache('full');
+            $success = true;
         }
     }
-
-    // Clear cache
-    $modx->clearCache('full');
-
-    $success = true;
 }
-
-// Get current values
-$provider = $modx->getConfig('ai_assistant_provider', 'openai');
-$apiKey = $modx->getConfig('ai_assistant_api_key', '');
-$apiUrl = $modx->getConfig('ai_assistant_api_url', 'https://api.openai.com/v1');
-$model = $modx->getConfig('ai_assistant_model', 'gpt-4');
-
-// Mask API key for display
-$maskedKey = $apiKey ? substr($apiKey, 0, 8) . '...' . substr($apiKey, -4) : '';
-
+$catalog = (new ModelCatalog())->get(isset($_POST['refresh']) && !$error);
 ?>
-<!DOCTYPE html>
-<html>
-<head>
-    <title>AI Assistant Settings</title>
-    <style>
-        body {
-            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-            margin: 0;
-            padding: 20px;
-            background: #f5f5f5;
-        }
-        .container {
-            max-width: 800px;
-            margin: 0 auto;
-            background: white;
-            padding: 30px;
-            border-radius: 8px;
-            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
-        }
-        h1 {
-            margin-top: 0;
-            color: #333;
-            font-size: 24px;
-            border-bottom: 2px solid #6366f1;
-            padding-bottom: 10px;
-        }
-        .form-group {
-            margin-bottom: 20px;
-        }
-        label {
-            display: block;
-            margin-bottom: 5px;
-            font-weight: 600;
-            color: #333;
-        }
-        .help-text {
-            font-size: 12px;
-            color: #666;
-            margin-top: 5px;
-        }
-        input[type="text"],
-        input[type="password"],
-        select {
-            width: 100%;
-            padding: 10px;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            font-size: 14px;
-            box-sizing: border-box;
-        }
-        input:focus,
-        select:focus {
-            outline: none;
-            border-color: #6366f1;
-            box-shadow: 0 0 0 3px rgba(99, 102, 241, 0.1);
-        }
-        .btn {
-            background: #6366f1;
-            color: white;
-            padding: 12px 24px;
-            border: none;
-            border-radius: 4px;
-            font-size: 14px;
-            font-weight: 600;
-            cursor: pointer;
-            transition: background 0.2s;
-        }
-        .btn:hover {
-            background: #4f46e5;
-        }
-        .alert {
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .alert-success {
-            background: #d1fae5;
-            color: #065f46;
-            border: 1px solid #6ee7b7;
-        }
-        .api-key-container {
-            position: relative;
-        }
-        .api-key-container input {
-            padding-right: 100px;
-        }
-        .toggle-visibility {
-            position: absolute;
-            right: 10px;
-            top: 50%;
-            transform: translateY(-50%);
-            background: none;
-            border: none;
-            color: #6366f1;
-            cursor: pointer;
-            font-size: 12px;
-        }
-        .provider-info {
-            background: #f0f0ff;
-            padding: 15px;
-            border-radius: 4px;
-            margin-bottom: 20px;
-        }
-        .provider-info h3 {
-            margin-top: 0;
-            font-size: 14px;
-        }
-        .provider-info p {
-            margin-bottom: 0;
-            font-size: 13px;
-        }
-        .current-value {
-            font-size: 12px;
-            color: #888;
-            margin-top: 3px;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>🤖 AI Assistant Settings</h1>
-
-        <?php if (!empty($success)): ?>
-        <div class="alert alert-success">
-            Settings saved successfully! Cache has been cleared.
-        </div>
-        <?php endif; ?>
-
-        <div class="provider-info">
-            <h3>About AI Provider</h3>
-            <p>AI Assistant supports OpenAI (GPT-4, GPT-3.5) and Anthropic (Claude) APIs.
-               You can also use OpenAI-compatible APIs by specifying a custom API URL.</p>
-        </div>
-
-        <form method="post">
-            <?php if (function_exists('csrf_token')): ?>
-            <input type="hidden" name="_token" value="<?= csrf_token() ?>">
-            <?php endif; ?>
-
-            <div class="form-group">
-                <label for="ai_assistant_provider">AI Provider</label>
-                <select name="ai_assistant_provider" id="ai_assistant_provider">
-                    <option value="openai" <?= $provider === 'openai' ? 'selected' : '' ?>>OpenAI</option>
-                    <option value="anthropic" <?= $provider === 'anthropic' ? 'selected' : '' ?>>Anthropic (Claude)</option>
-                </select>
-                <div class="help-text">Select your AI provider</div>
-            </div>
-
-            <div class="form-group">
-                <label for="ai_assistant_api_key">API Key</label>
-                <div class="api-key-container">
-                    <input type="password"
-                           name="ai_assistant_api_key"
-                           id="ai_assistant_api_key"
-                           value="<?= htmlspecialchars($apiKey) ?>"
-                           placeholder="sk-...">
-                    <button type="button" class="toggle-visibility" onclick="toggleApiKey()">Show/Hide</button>
-                </div>
-                <?php if ($maskedKey): ?>
-                <div class="current-value">Current: <?= htmlspecialchars($maskedKey) ?></div>
-                <?php endif; ?>
-                <div class="help-text">Your API key from OpenAI or Anthropic</div>
-            </div>
-
-            <div class="form-group">
-                <label for="ai_assistant_api_url">API URL</label>
-                <input type="text"
-                       name="ai_assistant_api_url"
-                       id="ai_assistant_api_url"
-                       value="<?= htmlspecialchars($apiUrl) ?>"
-                       placeholder="https://api.openai.com/v1">
-                <div class="help-text">API endpoint. Change for OpenAI-compatible APIs (like Azure, local LLMs)</div>
-            </div>
-
-            <div class="form-group">
-                <label for="ai_assistant_model">Model</label>
-                <input type="text"
-                       name="ai_assistant_model"
-                       id="ai_assistant_model"
-                       value="<?= htmlspecialchars($model) ?>"
-                       placeholder="gpt-4">
-                <div class="help-text">Model name: gpt-4, gpt-3.5-turbo, claude-3-sonnet-20240229, etc.</div>
-            </div>
-
-            <button type="submit" name="save" class="btn">Save Settings</button>
-        </form>
-    </div>
-
-    <script>
-        function toggleApiKey() {
-            var input = document.getElementById('ai_assistant_api_key');
-            input.type = input.type === 'password' ? 'text' : 'password';
-        }
-    </script>
-</body>
-</html>
+<!doctype html>
+<html lang="ru"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
+<title>AI Assistant Settings</title>
+<style>body{font:15px system-ui;background:#f5f5f5;margin:24px;color:#222}.container{max-width:800px;margin:auto;background:white;padding:28px;border-radius:12px}label{display:block;margin-top:20px;font-weight:600}input,select{box-sizing:border-box;width:100%;padding:10px;margin:6px 0;border:1px solid #ccc;border-radius:6px}button{padding:10px 18px;background:#6366f1;color:white;border:0;border-radius:6px;cursor:pointer;margin-top:18px}small{color:#666}.error{color:#b91c1c}.success{color:#15803d}</style></head>
+<body><main class="container"><h1>AI Assistant</h1>
+<?php if ($error): ?><p class="error"><?= $escape($error) ?></p><?php endif ?>
+<?php if ($success): ?><p class="success">Настройки сохранены, кеш CMS очищен.</p><?php endif ?>
+<p>OpenRouter и другие API с форматом OpenAI Chat Completions; также прямой Anthropic Messages API. Доступ к ассистенту имеют администраторы CMS.</p>
+<form method="post">
+<input type="hidden" name="_ai_token" value="<?= $escape(ManagerSecurity::token()) ?>">
+<label for="provider">Протокол API</label><select name="provider" id="provider">
+<option value="openai" <?= $values['provider'] === 'openai' ? 'selected' : '' ?>>OpenRouter / OpenAI-compatible</option>
+<option value="anthropic" <?= $values['provider'] === 'anthropic' ? 'selected' : '' ?>>Anthropic (прямой API)</option></select>
+<label for="api_url">API Base URL</label><input type="url" id="api_url" name="api_url" required value="<?= $escape($values['api_url']) ?>">
+<small>OpenRouter: https://openrouter.ai/api/v1 · OpenAI: https://api.openai.com/v1. Для прямого Anthropic используется фиксированный https://api.anthropic.com/v1/messages.</small>
+<label for="api_key">API Key</label><input type="password" id="api_key" name="api_key" autocomplete="new-password" placeholder="<?= $values['api_key'] ? 'Ключ сохранён — оставьте пустым, чтобы не менять' : 'Введите ключ' ?>">
+<label for="catalog">Каталог OpenRouter: модели с вызовом инструментов</label>
+<select id="catalog"><option value="">Выберите модель или введите ID ниже</option>
+<?php foreach ($catalog['models'] as $item): ?>
+<option value="<?= $escape($item['id']) ?>"><?= $escape($item['name'] . ' · $' . $item['prompt_per_million'] . ' / $' . $item['completion_per_million'] . ' за 1M токенов') ?></option>
+<?php endforeach ?></select>
+<small>Цены: вход / выход. Снимок каталога: <?= $escape(gmdate('Y-m-d H:i', $catalog['fetched_at'])) ?> UTC. <?= $catalog['stale'] ? 'Каталог сейчас недоступен: показан сохранённый список.' : 'Каталог обновляется раз в сутки.' ?></small>
+<label for="model">Model ID</label><input type="text" id="model" name="model" required value="<?= $escape($values['model']) ?>">
+<small>Для прямых API укажите ID провайдера без префикса OpenRouter. Произвольный ID сохраняется, даже если его нет в каталоге.</small>
+<button type="submit" name="save" value="1">Сохранить</button>
+<button type="submit" name="refresh" value="1" formnovalidate>Обновить каталог</button>
+</form></main>
+<script>document.getElementById('catalog').addEventListener('change',function(){if(this.value){document.getElementById('model').value=this.value;document.getElementById('provider').value='openai';document.getElementById('api_url').value='https://openrouter.ai/api/v1';}});</script>
+</body></html>

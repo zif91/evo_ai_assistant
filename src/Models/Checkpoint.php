@@ -63,7 +63,7 @@ class Checkpoint extends Model
         return static::where('entity_type', $type)
             ->where('entity_id', $id)
             ->where('is_rolled_back', false)
-            ->orderBy('created_at', 'desc')
+            ->orderBy('created_at', 'desc')->orderBy('id', 'desc')
             ->get();
     }
 
@@ -74,7 +74,7 @@ class Checkpoint extends Model
     {
         return static::where('session_id', $sessionId)
             ->where('is_rolled_back', false)
-            ->orderBy('created_at', 'desc')
+            ->orderBy('created_at', 'desc')->orderBy('id', 'desc')
             ->get();
     }
 

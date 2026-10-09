@@ -89,12 +89,15 @@ class TvService
 
         $data = array_merge($defaults, $data);
 
+        $templates = $data['templates'] ?? [];
+        unset($data['templates']);
         $tv = new SiteTmplvar($data);
         $tv->save();
+        evo()->clearCache('full');
 
         // Bind to templates if specified
-        if (!empty($data['templates'])) {
-            $this->bindToTemplates($tv->id, $data['templates']);
+        if (!empty($templates)) {
+            $this->bindToTemplates($tv->id, $templates);
         }
 
         return $tv->fresh();
@@ -133,6 +136,7 @@ class TvService
 
         $tv->fill($changes);
         $tv->save();
+        evo()->clearCache('full');
 
         // Update template bindings if specified
         if (isset($data['templates'])) {
@@ -167,6 +171,7 @@ class TvService
             }
         }
 
+        evo()->clearCache('full');
         return true;
     }
 

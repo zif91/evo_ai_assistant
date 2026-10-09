@@ -27,6 +27,20 @@
     function init() {
         setupEventListeners();
         autoResizeInput();
+        loadHistory();
+    }
+
+    async function loadHistory() {
+        try {
+            const response = await fetch(config.apiUrl + '/history', {credentials: 'same-origin'});
+            const data = await response.json();
+            if (data.success && data.data.length) {
+                messagesContainer.innerHTML = '';
+                data.data.forEach(item => addMessage(item.content, item.role));
+            }
+        } catch (error) {
+            console.error('Failed to load chat history');
+        }
     }
 
     /**
@@ -83,7 +97,7 @@
      */
     async function sendMessage() {
         const message = inputField.value.trim();
-        if (!message || isLoading) return;
+        if (!message || isLoading || !config.isConfigured) return;
 
         // Add user message to UI
         addMessage(message, 'user');
@@ -101,6 +115,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-AI-CSRF-Token': config.csrfToken,
                     'Accept': 'application/json',
                 },
                 body: JSON.stringify({
@@ -115,7 +130,9 @@
             showTyping(false);
             isLoading = false;
 
-            if (data.success) {
+            if (data.actions && !data.success) {
+                addMessage(data.error || translations.error, 'assistant', data.actions, true);
+            } else if (data.success) {
                 addMessage(data.message, 'assistant', data.actions);
             } else {
                 addMessage(data.error || translations.error, 'assistant', null, true);
@@ -230,7 +247,7 @@
             html += `
                 <div class="ai-action-result">
                     <div class="ai-action-result-header ${statusClass}">
-                        ${isSuccess ? '✓' : '✗'} ${action.action || 'Action'}
+                        ${isSuccess ? '✓' : '✗'} ${escapeHtml(action.action || action.name || 'Action')}
                     </div>
                     ${renderActionData(action)}
                 </div>
@@ -245,7 +262,7 @@
      */
     function renderActionData(action) {
         if (action.error) {
-            return `<p style="color: #dc2626;">${action.error}</p>`;
+            return `<p style="color: #dc2626;">${escapeHtml(action.error)}</p>`;
         }
 
         if (!action.data) return '';
@@ -274,7 +291,7 @@
                     <div class="ai-seo-score-circle grade-${action.data.grade.toLowerCase()}">${action.data.grade}</div>
                     <div class="ai-seo-score-info">
                         <h4>SEO Score: ${action.data.score}/100</h4>
-                        <p>${action.data.summary || ''}</p>
+                        <p>${escapeHtml(action.data.summary || '')}</p>
                     </div>
                 </div>
             `;
@@ -282,10 +299,10 @@
 
         // Generic data
         if (typeof action.data === 'object') {
-            return `<pre><code>${JSON.stringify(action.data, null, 2)}</code></pre>`;
+            return `<pre><code>${escapeHtml(JSON.stringify(action.data, null, 2))}</code></pre>`;
         }
 
-        return `<p>${action.data}</p>`;
+        return `<p>${escapeHtml(String(action.data))}</p>`;
     }
 
     /**
@@ -293,7 +310,7 @@
      */
     function escapeHtml(str) {
         if (!str) return '';
-        return str
+        return String(str)
             .replace(/&/g, '&amp;')
             .replace(/</g, '&lt;')
             .replace(/>/g, '&gt;')
@@ -320,15 +337,17 @@
      */
     async function clearHistory() {
         try {
-            await fetch(config.apiUrl + '/history', {
+            const response = await fetch(config.apiUrl + '/history', {
                 method: 'DELETE',
+                headers: { 'X-AI-CSRF-Token': config.csrfToken },
                 credentials: 'same-origin'
             });
 
+            if (!response.ok) throw new Error('Failed to clear history');
             // Clear UI except welcome message
             const messages = messagesContainer.querySelectorAll('.ai-message');
             messages.forEach((msg, index) => {
-                if (index > 0) msg.remove();
+                msg.remove();
             });
         } catch (error) {
             console.error('Failed to clear history:', error);
@@ -385,6 +404,7 @@
         try {
             const response = await fetch(config.apiUrl + '/checkpoints/' + checkpointId + '/rollback', {
                 method: 'POST',
+                headers: { 'X-AI-CSRF-Token': config.csrfToken },
                 credentials: 'same-origin'
             });
             const data = await response.json();
@@ -413,6 +433,7 @@
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
+                    'X-AI-CSRF-Token': config.csrfToken,
                 },
                 body: JSON.stringify({ action, params }),
                 credentials: 'same-origin'

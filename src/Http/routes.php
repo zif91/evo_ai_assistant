@@ -16,6 +16,8 @@ use Illuminate\Support\Facades\Route;
 
 Route::prefix('ai-assistant')->middleware([AiAssistantAuth::class])->group(function () {
 
+    Route::get('/', [PanelController::class, 'index']);
+
     // Panel routes (returns HTML for the sidebar)
     Route::get('/panel', [PanelController::class, 'index'])->name('ai-assistant.panel');
 
